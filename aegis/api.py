@@ -1,25 +1,25 @@
 """
-AEGIS FastAPI Backend
+AEGIS FastAPI Backend v3
 
 Endpoints:
-  GET  /status        — current system state
-  GET  /logs          — trade decision log
-  POST /run-cycle     — trigger one trading cycle
-  POST /set-volatile  — toggle volatile mode
-  POST /demo-scenario — run the full dramatic demo (5 calm + 5 volatile)
-  POST /reset         — reset entire system
-  GET  /portfolio     — portfolio summary
-  GET  /price-history — raw price history for charting
+  GET  /status             — current system state
+  GET  /logs               — trade decision log
+  POST /run-cycle          — trigger one trading cycle
+  POST /set-volatile       — toggle volatile mode
+  POST /demo-scenario      — run 5 calm + 5 volatile cycles
+  POST /reset              — reset entire system
+  GET  /portfolio          — portfolio summary
+  GET  /risk-breakdown     — live risk rule states from engine
+  GET  /performance-comparison — with vs without aegis equity curves
 """
 
 import random
-import numpy as np
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from aegis.main import AegisGovernor
 
-app = FastAPI(title="AEGIS Risk Governor", version="2.0.0")
+app = FastAPI(title="AEGIS Risk Governor", version="3.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 governor = AegisGovernor(risk_threshold=0.65)
@@ -28,20 +28,24 @@ governor.market.seed_history(30)
 
 @app.get("/")
 def root():
-    return {"name": "AEGIS", "description": "Autonomous Risk Governor for Trading Agents", "version": "2.0"}
+    return {"name": "AEGIS", "version": "3.0"}
 
 
 @app.get("/status")
 def status():
     price = governor.market.get_current_price()
     volatility = governor.market.get_volatility()
+    pnl = governor.executor._current_pnl(price) if price else 0.0
+    pv = governor.executor.get_portfolio_value(price) if price else 100000.0
+    pnl_pct = (pnl / governor.executor.initial_cash) * 100 if governor.executor.initial_cash else 0.0
     return {
         "current_price": price,
         "cycle_count": governor.cycle_count,
-        "portfolio_value": governor.executor.get_portfolio_value(price) if price else None,
+        "portfolio_value": pv,
         "position_btc": governor.executor.position,
         "cash": governor.executor.cash,
-        "pnl": governor.executor._current_pnl(price) if price else 0.0,
+        "pnl": pnl,
+        "pnl_pct": round(pnl_pct, 3),
         "risk_threshold": governor.risk_engine.threshold,
         "trades_blocked": governor.risk_engine.blocked_count,
         "trades_approved": governor.risk_engine.approved_count,
@@ -69,20 +73,14 @@ def set_volatile(volatile: bool = True):
 
 @app.post("/demo-scenario")
 def demo_scenario():
-    """Run the full dramatic demo: calm cycles, then volatility spike with blocks."""
     results = []
-
-    # Phase 1: 5 calm market cycles (trades should execute)
     governor.market.set_volatile(False)
     for _ in range(5):
         results.append(governor.run_cycle())
-
-    # Phase 2: 5 volatile cycles (trades should get BLOCKED)
     governor.market.set_volatile(True)
     for _ in range(5):
         results.append(governor.run_cycle())
 
-    # Leave volatile on so user can see it in UI
     blocked = sum(1 for r in results if not r["risk_result"]["approved"])
     executed = sum(1 for r in results if r["trade_result"]["executed"])
     capital_at_risk = sum(
@@ -90,12 +88,7 @@ def demo_scenario():
         for r in results
         if not r["risk_result"]["approved"] and r["chosen_signal"]["signal"] != "HOLD"
     )
-
     return {
-        "phases": [
-            {"name": "Calm Market", "cycles": 5, "description": "Normal trading conditions"},
-            {"name": "Volatility Spike", "cycles": 5, "description": "Market stress detected"},
-        ],
         "total_cycles": len(results),
         "executed": executed,
         "blocked": blocked,
@@ -106,11 +99,10 @@ def demo_scenario():
 
 @app.post("/reset")
 def reset():
-    """Reset the entire system to fresh state."""
     global governor
     governor = AegisGovernor(risk_threshold=0.65)
     governor.market.seed_history(30)
-    return {"status": "reset", "message": "AEGIS system reset to initial state"}
+    return {"status": "reset"}
 
 
 @app.get("/portfolio")
@@ -121,37 +113,101 @@ def portfolio():
         "position_btc": governor.executor.position,
         "portfolio_value": governor.executor.get_portfolio_value(price) if price else None,
         "pnl": governor.executor._current_pnl(price) if price else None,
-        "trades": governor.executor.trades[-20:],
     }
 
 
-@app.get("/price-history")
-def price_history():
+@app.get("/risk-breakdown")
+def risk_breakdown():
+    """Return live risk rule states computed from current market data."""
+    prices = governor.market.get_prices()
+    price = governor.market.get_current_price()
+    vol = governor.market.get_volatility()
+
+    # Position concentration
+    position_val = governor.executor.position * price if price else 0.0
+    max_position = 50000.0
+    position_pct = min(position_val / max_position, 1.0) if max_position else 0.0
+
+    # Volatility regime
+    vol_pct = vol * 100
+    if vol_pct > 2.0:
+        vol_regime = "Extreme"
+    elif vol_pct > 0.8:
+        vol_regime = "Elevated"
+    else:
+        vol_regime = "Normal"
+
+    # Drawdown from last risk eval
+    last_logs = governor.logger.get_entries(last_n=1)
+    details = last_logs[0].get("risk_details", {}) if last_logs else {}
+
+    vol_risk_val = details.get("volatility_risk", 0.0)
+    dd_risk_val = details.get("drawdown_risk", 0.0)
+    crash_risk_val = details.get("crash_risk", 0.0)
+    conf_risk_val = details.get("confidence_risk", 0.0)
+    max_dd = details.get("max_drawdown", 0.0)
+    last_move = details.get("last_move", 0.0)
+
     return {
-        "prices": governor.market.get_prices(),
-        "timestamps": governor.market.timestamps,
+        "rules": [
+            {
+                "name": "Volatility Regime",
+                "current": f"{vol_pct:.2f}%",
+                "limit": "3.00%",
+                "pct": min(vol_pct / 3.0, 1.0),
+                "status": vol_regime,
+            },
+            {
+                "name": "Max Position Size",
+                "current": f"${position_val:,.0f}",
+                "limit": f"${max_position:,.0f}",
+                "pct": position_pct,
+                "status": "OK" if position_pct < 0.8 else "Warning",
+            },
+            {
+                "name": "Drawdown Risk",
+                "current": f"{max_dd:.2%}",
+                "limit": "5.00%",
+                "pct": dd_risk_val,
+                "status": "OK" if dd_risk_val < 0.5 else "Elevated",
+            },
+            {
+                "name": "Crash Detection",
+                "current": f"{last_move:.2%}",
+                "limit": "2.50%",
+                "pct": crash_risk_val,
+                "status": "OK" if crash_risk_val < 0.6 else "Triggered",
+            },
+            {
+                "name": "Confidence Filter",
+                "current": f"{conf_risk_val:.0%}" if conf_risk_val > 0 else "Clear",
+                "limit": "Auto",
+                "pct": conf_risk_val,
+                "status": "OK" if conf_risk_val < 0.5 else "Active",
+            },
+        ],
+        "composite_weights": {
+            "volatility": 0.40,
+            "drawdown": 0.25,
+            "confidence": 0.20,
+            "crash": 0.15,
+        },
     }
 
 
 @app.get("/performance-comparison")
 def performance_comparison():
-    """Generate simulated With-Aegis vs Without-Aegis portfolio curves."""
-    logs = governor.logger.get_entries()
-    if not logs:
+    entries = governor.logger.get_entries()
+    if not entries:
         return {"with_aegis": [], "without_aegis": [], "cycles": []}
 
-    # With Aegis = actual PnL from executor
     with_aegis = [100000.0]
     without_aegis = [100000.0]
 
     rng = random.Random(42)
-    for entry in logs:
+    for entry in entries:
         with_aegis.append(100000.0 + entry.get("pnl", 0.0))
-
-        # Without Aegis: simulate what happens if ALL trades go through
-        # During blocked periods, the unprotected portfolio takes hits
         if not entry["approved"]:
-            # Would have lost money on this risky trade
             loss = rng.uniform(500, 3000)
             without_aegis.append(without_aegis[-1] - loss)
         elif entry["executed"]:
@@ -160,11 +216,10 @@ def performance_comparison():
         else:
             without_aegis.append(without_aegis[-1] + rng.uniform(-50, 50))
 
-    cycles = list(range(len(with_aegis)))
     return {
         "with_aegis": with_aegis,
         "without_aegis": without_aegis,
-        "cycles": cycles,
+        "cycles": list(range(len(with_aegis))),
     }
 
 

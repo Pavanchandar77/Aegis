@@ -1,713 +1,546 @@
 """
-AEGIS — Premium Fintech Dashboard
-Hackathon-winning UI with dramatic trade blocking visuals.
+AEGIS — Institutional Risk Governor Dashboard
+Bloomberg-meets-Linear design. Dense, functional, zero fluff.
 """
 
 import streamlit as st
 import requests
 import time
 import plotly.graph_objects as go
-import plotly.express as px
 from datetime import datetime
 
-API_URL = "http://localhost:8000"
+API = "http://localhost:8000"
 
-st.set_page_config(
-    page_title="AEGIS Risk Governor",
-    page_icon="🛡️",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+st.set_page_config(page_title="AEGIS", page_icon="", layout="wide", initial_sidebar_state="collapsed")
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# PREMIUM DARK THEME CSS
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap');
+# ─── CSS: institutional dark theme ───────────────────────────────────────────
 
-    /* ── Global Dark Theme ── */
-    .stApp {
-        background: #0b0f19;
-        color: #e0e6ed;
-    }
-    header[data-testid="stHeader"] {
-        background: #0b0f19;
-    }
-    section[data-testid="stSidebar"] {
-        background: #0d1220;
-    }
+st.markdown("""<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-    /* ── Typography ── */
-    h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-        color: #ffffff !important;
-        font-family: 'Inter', sans-serif !important;
-    }
-    p, span, li, div {
-        font-family: 'Inter', sans-serif;
-    }
+/* reset */
+.stApp { background: #0a0e17; color: #c4cad4; font-family: 'Inter', -apple-system, sans-serif; }
+header[data-testid="stHeader"] { background: #0a0e17; }
+.block-container { padding: 1rem 2rem 2rem 2rem; max-width: 100%; }
+section[data-testid="stSidebar"] { display: none; }
 
-    /* ── Cards ── */
-    .metric-card {
-        background: linear-gradient(135deg, #111827 0%, #1a1f36 100%);
-        border: 1px solid #1e293b;
-        border-radius: 16px;
-        padding: 24px;
-        text-align: center;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-    }
-    .metric-card:hover {
-        border-color: #3b82f6;
-        box-shadow: 0 4px 30px rgba(59,130,246,0.15);
-    }
-    .metric-label {
-        font-size: 12px;
-        font-weight: 600;
-        letter-spacing: 1.5px;
-        text-transform: uppercase;
-        color: #64748b;
-        margin-bottom: 8px;
-    }
-    .metric-value {
-        font-size: 32px;
-        font-weight: 800;
-        font-family: 'JetBrains Mono', monospace;
-        color: #f8fafc;
-    }
-    .metric-value.green { color: #10b981; }
-    .metric-value.red { color: #ef4444; }
-    .metric-value.blue { color: #3b82f6; }
-    .metric-value.amber { color: #f59e0b; }
+/* nuke streamlit chrome */
+#MainMenu, footer, [data-testid="stDecoration"] { display: none !important; }
+.stDeployButton { display: none !important; }
 
-    /* ── Hero Banner ── */
-    .hero-banner {
-        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
-        border: 1px solid #312e81;
-        border-radius: 20px;
-        padding: 40px 48px;
-        margin-bottom: 32px;
-        position: relative;
-        overflow: hidden;
-    }
-    .hero-banner::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: radial-gradient(circle at 30% 50%, rgba(59,130,246,0.08) 0%, transparent 50%);
-    }
-    .hero-title {
-        font-size: 42px;
-        font-weight: 900;
-        letter-spacing: -1px;
-        margin: 0;
-        background: linear-gradient(135deg, #60a5fa, #a78bfa, #60a5fa);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        position: relative;
-    }
-    .hero-sub {
-        font-size: 16px;
-        color: #94a3b8;
-        margin-top: 8px;
-        position: relative;
-    }
+/* typography */
+h1, h2, h3, h4, h5, h6 { font-family: 'Inter', sans-serif !important; color: #e2e8f0 !important; }
+p, span, div, td, th { font-family: 'Inter', sans-serif; }
 
-    /* ── Decision Panels ── */
-    .decision-executed {
-        background: linear-gradient(135deg, #052e16 0%, #064e3b 100%);
-        border: 2px solid #10b981;
-        border-radius: 16px;
-        padding: 32px;
-        text-align: center;
-        box-shadow: 0 0 40px rgba(16,185,129,0.15);
-    }
-    .decision-blocked {
-        background: linear-gradient(135deg, #450a0a 0%, #7f1d1d 100%);
-        border: 2px solid #ef4444;
-        border-radius: 16px;
-        padding: 32px;
-        text-align: center;
-        animation: pulseRed 2s ease-in-out infinite;
-        box-shadow: 0 0 60px rgba(239,68,68,0.3);
-    }
-    .decision-hold {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border: 2px solid #475569;
-        border-radius: 16px;
-        padding: 32px;
-        text-align: center;
-    }
-    .decision-text {
-        font-size: 36px;
-        font-weight: 900;
-        font-family: 'Inter', sans-serif;
-        letter-spacing: 2px;
-    }
-    .decision-reason {
-        font-size: 15px;
-        color: #fca5a5;
-        margin-top: 12px;
-        font-weight: 500;
-    }
-    .capital-saved {
-        font-size: 14px;
-        color: #10b981;
-        margin-top: 16px;
-        padding: 10px 20px;
-        background: rgba(16,185,129,0.1);
-        border-radius: 8px;
-        display: inline-block;
-        font-weight: 600;
-    }
+/* ── top bar ── */
+.topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0; margin-bottom: 12px;
+    border-bottom: 1px solid #1a1f2e;
+}
+.topbar-left { display: flex; align-items: center; gap: 16px; }
+.topbar-brand {
+    font-size: 15px; font-weight: 700; letter-spacing: 2px; color: #e2e8f0;
+    font-family: 'JetBrains Mono', monospace;
+}
+.topbar-status {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: #6b7280;
+    text-transform: uppercase;
+}
+.topbar-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    display: inline-block; flex-shrink: 0;
+}
+.topbar-dot.green { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+.topbar-dot.red { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+.topbar-strat {
+    font-size: 11px; color: #6b7280; font-weight: 500;
+    padding: 3px 10px; background: #111827; border: 1px solid #1e293b;
+    border-radius: 4px; font-family: 'JetBrains Mono', monospace;
+}
 
-    @keyframes pulseRed {
-        0%, 100% { box-shadow: 0 0 30px rgba(239,68,68,0.2); }
-        50% { box-shadow: 0 0 80px rgba(239,68,68,0.5), 0 0 120px rgba(239,68,68,0.1); }
-    }
+/* ── metric cards ── */
+.mcard {
+    background: #111827; border: 1px solid #1a1f2e; border-radius: 6px;
+    padding: 12px 14px;
+}
+.mcard-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 1px;
+    text-transform: uppercase; color: #4b5563; margin-bottom: 4px;
+}
+.mcard-val {
+    font-size: 18px; font-weight: 600; color: #e2e8f0;
+    font-family: 'JetBrains Mono', monospace;
+}
+.mcard-val.up { color: #22c55e; }
+.mcard-val.down { color: #ef4444; }
+.mcard-val.muted { color: #6b7280; }
+.mcard-sub {
+    font-size: 10px; color: #4b5563; margin-top: 2px;
+    font-family: 'JetBrains Mono', monospace;
+}
 
-    /* ── Section Headers ── */
-    .section-header {
-        font-size: 13px;
-        font-weight: 700;
-        letter-spacing: 2px;
-        text-transform: uppercase;
-        color: #3b82f6;
-        margin: 32px 0 16px 0;
-        padding-bottom: 8px;
-        border-bottom: 1px solid #1e293b;
-    }
+/* ── regime tag ── */
+.regime-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 3px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+    font-family: 'JetBrains Mono', monospace;
+}
+.regime-normal { background: rgba(34,197,94,0.12); color: #22c55e; border: 1px solid rgba(34,197,94,0.25); }
+.regime-elevated { background: rgba(234,179,8,0.12); color: #eab308; border: 1px solid rgba(234,179,8,0.25); }
+.regime-extreme { background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.25); }
 
-    /* ── Log Entries ── */
-    .log-entry {
-        background: #111827;
-        border-left: 3px solid #3b82f6;
-        border-radius: 0 8px 8px 0;
-        padding: 12px 16px;
-        margin: 6px 0;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 13px;
-        color: #cbd5e1;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    }
-    .log-entry.blocked {
-        border-left-color: #ef4444;
-        background: linear-gradient(90deg, #1c0a0a 0%, #111827 30%);
-    }
-    .log-entry.executed {
-        border-left-color: #10b981;
-    }
+/* ── section labels ── */
+.sec-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    text-transform: uppercase; color: #374151; margin: 16px 0 8px 0;
+    padding-bottom: 6px; border-bottom: 1px solid #141924;
+}
 
-    /* ── Volatility Badge ── */
-    .vol-badge {
-        display: inline-block;
-        padding: 4px 14px;
-        border-radius: 20px;
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: 1px;
-    }
-    .vol-low { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid #10b981; }
-    .vol-med { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid #f59e0b; }
-    .vol-high { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid #ef4444; }
+/* ── trade log table ── */
+.tlog-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tlog-table th {
+    text-align: left; padding: 6px 8px; color: #4b5563;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.5px;
+    text-transform: uppercase; border-bottom: 1px solid #1a1f2e;
+}
+.tlog-table td {
+    padding: 7px 8px; border-bottom: 1px solid #0f1420;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #9ca3af;
+}
+.tlog-table tr:hover td { background: #111827; }
+.tlog-table tr.blocked td { background: rgba(239,68,68,0.04); }
+.td-green { color: #22c55e; font-weight: 600; }
+.td-red { color: #ef4444; font-weight: 600; }
+.td-amber { color: #eab308; font-weight: 600; }
+.td-muted { color: #4b5563; }
+.td-mono { font-family: 'JetBrains Mono', monospace; }
 
-    /* ── Buttons ── */
-    .stButton > button {
-        border-radius: 12px;
-        font-weight: 600;
-        font-family: 'Inter', sans-serif;
-        letter-spacing: 0.5px;
-        padding: 10px 24px;
-        transition: all 0.2s ease;
-    }
-    .stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
-        border: none !important;
-    }
+/* ── risk rule rows ── */
+.rule-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 0; border-bottom: 1px solid #111827;
+    font-size: 12px;
+}
+.rule-name { width: 130px; color: #6b7280; font-weight: 500; flex-shrink: 0; }
+.rule-bar-bg {
+    flex: 1; height: 6px; background: #1a1f2e; border-radius: 3px; overflow: hidden;
+}
+.rule-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.rule-vals {
+    width: 140px; text-align: right; color: #4b5563;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; flex-shrink: 0;
+}
 
-    /* ── Remove default padding ── */
-    .block-container { padding-top: 2rem; }
+/* ── blocked summary card ── */
+.blocked-card {
+    background: #111827; border: 1px solid #1a1f2e; border-radius: 6px;
+    padding: 14px;
+}
+.blocked-big {
+    font-size: 28px; font-weight: 700; color: #ef4444;
+    font-family: 'JetBrains Mono', monospace;
+}
+.blocked-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 1px;
+    text-transform: uppercase; color: #4b5563; margin-bottom: 2px;
+}
+.blocked-reason {
+    font-size: 11px; color: #6b7280; margin-top: 8px;
+    padding: 6px 8px; background: rgba(239,68,68,0.06);
+    border-left: 2px solid #ef4444; border-radius: 0 3px 3px 0;
+}
 
-    /* ── Plotly dark ── */
-    .js-plotly-plot .plotly .modebar { display: none !important; }
+/* ── risk score bar (inline) ── */
+.risk-inline {
+    display: inline-flex; align-items: center; gap: 6px;
+}
+.risk-bar-sm {
+    width: 40px; height: 4px; background: #1a1f2e; border-radius: 2px;
+    overflow: hidden; display: inline-block; vertical-align: middle;
+}
+.risk-bar-sm-fill { height: 100%; border-radius: 2px; }
 
-    /* ── Streamlit metric override ── */
-    [data-testid="stMetricValue"] {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 28px !important;
-        color: #f8fafc !important;
-    }
-    [data-testid="stMetricLabel"] {
-        color: #64748b !important;
-        text-transform: uppercase !important;
-        letter-spacing: 1px !important;
-        font-size: 11px !important;
-    }
-</style>
-""", unsafe_allow_html=True)
+/* ── buttons: compact ── */
+.stButton > button {
+    font-size: 11px !important; font-weight: 600 !important;
+    padding: 5px 14px !important; border-radius: 4px !important;
+    font-family: 'Inter', sans-serif !important; letter-spacing: 0.3px !important;
+    border: 1px solid #1e293b !important; background: #111827 !important;
+    color: #9ca3af !important; transition: all 0.15s !important;
+}
+.stButton > button:hover {
+    background: #1a1f2e !important; color: #e2e8f0 !important;
+    border-color: #374151 !important;
+}
+.stButton > button[kind="primary"] {
+    background: #1e3a5f !important; border-color: #2563eb !important;
+    color: #93c5fd !important;
+}
+.stButton > button[kind="primary"]:hover {
+    background: #1e40af !important; color: #dbeafe !important;
+}
+
+/* toggle */
+[data-testid="stBaseButton-secondary"] {
+    font-size: 11px !important;
+}
+
+/* plotly overrides */
+.js-plotly-plot .plotly .modebar { display: none !important; }
+</style>""", unsafe_allow_html=True)
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# HELPERS
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-def api(endpoint: str, method: str = "GET"):
+# ─── helpers ─────────────────────────────────────────────────────────────────
+
+def get(endpoint):
     try:
-        if method == "POST":
-            r = requests.post(f"{API_URL}{endpoint}", timeout=10)
-        else:
-            r = requests.get(f"{API_URL}{endpoint}", timeout=10)
-        return r.json()
+        return requests.get(f"{API}{endpoint}", timeout=5).json()
     except Exception as e:
         return {"error": str(e)}
 
+def post(endpoint):
+    try:
+        return requests.post(f"{API}{endpoint}", timeout=10).json()
+    except Exception as e:
+        return {"error": str(e)}
 
-def plotly_dark(fig, height=350):
+def dark_fig(fig, h=260):
     fig.update_layout(
-        plot_bgcolor="#0b0f19",
-        paper_bgcolor="#0b0f19",
-        font=dict(family="Inter", color="#94a3b8"),
-        height=height,
-        margin=dict(t=20, b=40, l=50, r=20),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94a3b8")),
-        xaxis=dict(gridcolor="#1e293b", zerolinecolor="#1e293b"),
-        yaxis=dict(gridcolor="#1e293b", zerolinecolor="#1e293b"),
+        plot_bgcolor="#0a0e17", paper_bgcolor="#0a0e17",
+        font=dict(family="Inter, sans-serif", color="#4b5563", size=11),
+        height=h, margin=dict(t=8, b=32, l=48, r=12),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#6b7280", size=10)),
+        xaxis=dict(gridcolor="#111827", zerolinecolor="#111827", tickfont=dict(size=10)),
+        yaxis=dict(gridcolor="#111827", zerolinecolor="#111827", tickfont=dict(size=10)),
     )
     return fig
 
+def risk_color(score):
+    if score > 0.65: return "#ef4444"
+    if score > 0.40: return "#eab308"
+    return "#22c55e"
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# HEADER
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-st.markdown("""
-<div class="hero-banner">
-    <div class="hero-title">AEGIS</div>
-    <div class="hero-sub">Autonomous Risk Governor &mdash; AI-powered trade firewall that blocks dangerous trades in real-time</div>
-</div>
-""", unsafe_allow_html=True)
+def risk_class(score):
+    if score > 0.65: return "td-red"
+    if score > 0.40: return "td-amber"
+    return "td-green"
+
+def regime_class(vol_pct):
+    if vol_pct > 2.0: return "regime-extreme", "EXTREME"
+    if vol_pct > 0.8: return "regime-elevated", "ELEVATED"
+    return "regime-normal", "NORMAL"
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# CONTROL BAR
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1.5])
+# ─── data ────────────────────────────────────────────────────────────────────
 
-with c1:
-    demo_clicked = st.button("🚀  RUN DEMO SCENARIO", use_container_width=True, type="primary")
-with c2:
-    cycle_clicked = st.button("▶  Run Single Cycle", use_container_width=True)
-with c3:
-    vol_on = st.button("⚡  Volatility Spike", use_container_width=True)
-with c4:
-    reset_clicked = st.button("🔄  Reset System", use_container_width=True)
-with c5:
-    auto_run = st.toggle("Auto", value=False, help="Auto-run cycles every 1.5s")
-
-# Handle button actions
-if demo_clicked:
-    with st.spinner("Running demo scenario..."):
-        demo_result = api("/demo-scenario", "POST")
-    if "error" not in demo_result:
-        st.session_state["demo_result"] = demo_result
-if cycle_clicked:
-    api("/run-cycle", "POST")
-if vol_on:
-    api("/set-volatile?volatile=true", "POST")
-if reset_clicked:
-    api("/reset", "POST")
-    st.session_state.pop("demo_result", None)
-    st.rerun()
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# FETCH DATA
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-status = api("/status")
+status = get("/status")
 if "error" in status:
-    st.markdown("""
-    <div style="text-align:center; padding:80px 20px;">
-        <div style="font-size:64px; margin-bottom:20px;">🛡️</div>
-        <div style="font-size:24px; color:#ef4444; font-weight:700;">AEGIS API Offline</div>
-        <div style="color:#64748b; margin-top:12px;">
-            Start the API server first:<br>
-            <code style="color:#3b82f6;">python -m aegis.api</code>
+    st.markdown("""<div style="text-align:center;padding:120px 20px;">
+        <div style="font-size:14px;color:#ef4444;font-weight:600;letter-spacing:1px;">AEGIS API OFFLINE</div>
+        <div style="color:#4b5563;margin-top:8px;font-size:12px;">
+            Start the backend: <code style="color:#93c5fd;">python -m aegis.api</code>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+    </div>""", unsafe_allow_html=True)
     st.stop()
 
-logs_data = api("/logs?last_n=50")
-logs = logs_data.get("logs", [])
+logs = get("/logs?last_n=50").get("logs", [])
 latest = logs[-1] if logs else None
 threshold = status.get("risk_threshold", 0.65)
+price = status.get("current_price") or 0
+vol = (status.get("volatility") or 0) * 100
+pnl = status.get("pnl", 0)
+pnl_pct = status.get("pnl_pct", 0)
+pv = status.get("portfolio_value", 100000)
+blocked = status.get("trades_blocked", 0)
+approved = status.get("trades_approved", 0)
+total = blocked + approved
+vol_cls, vol_label = regime_class(vol)
+is_volatile = status.get("volatile_mode", False)
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# KEY METRICS ROW
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-price = status.get("current_price", 0) or 0
-vol = status.get("volatility", 0) or 0
-vol_pct = vol * 100
 
-if vol_pct > 2.0:
-    vol_badge = '<span class="vol-badge vol-high">EXTREME</span>'
-elif vol_pct > 0.8:
-    vol_badge = '<span class="vol-badge vol-med">ELEVATED</span>'
-else:
-    vol_badge = '<span class="vol-badge vol-low">NORMAL</span>'
+# ─── top bar ─────────────────────────────────────────────────────────────────
 
-m1, m2, m3, m4, m5, m6 = st.columns(6)
+active_strat = latest["strategy"] if latest else "—"
+dot_cls = "red" if is_volatile else "green"
+status_label = "Volatile" if is_volatile else "Active"
 
-with m1:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">BTC / USDT</div>
-        <div class="metric-value blue">${price:,.2f}</div>
+st.markdown(f"""<div class="topbar">
+    <div class="topbar-left">
+        <span class="topbar-brand">AEGIS</span>
+        <span class="topbar-status"><span class="topbar-dot {dot_cls}"></span> {status_label}</span>
+        <span class="topbar-strat">{active_strat}</span>
+        <span class="regime-tag {vol_cls}">{vol_label}</span>
+    </div>
+</div>""", unsafe_allow_html=True)
+
+# controls — compact, right-aligned feel via narrow columns
+_sp, bc1, bc2, bc3, bc4, bc5 = st.columns([4, 1.2, 1.2, 1.2, 1, 0.8])
+with bc1:
+    demo_go = st.button("Run Demo", type="primary", use_container_width=True)
+with bc2:
+    cycle_go = st.button("Single Cycle", use_container_width=True)
+with bc3:
+    vol_go = st.button("Vol Spike" if not is_volatile else "Vol Off", use_container_width=True)
+with bc4:
+    reset_go = st.button("Reset", use_container_width=True)
+with bc5:
+    auto = st.toggle("Auto", value=False)
+
+if demo_go:
+    post("/demo-scenario")
+    st.rerun()
+if cycle_go:
+    post("/run-cycle")
+    st.rerun()
+if vol_go:
+    post(f"/set-volatile?volatile={'false' if is_volatile else 'true'}")
+    st.rerun()
+if reset_go:
+    post("/reset")
+    st.rerun()
+
+
+# ─── row 1: metrics ─────────────────────────────────────────────────────────
+
+k1, k2, k3, k4, k5, k6 = st.columns(6)
+
+with k1:
+    st.markdown(f"""<div class="mcard">
+        <div class="mcard-label">BTC / USDT</div>
+        <div class="mcard-val">${price:,.2f}</div>
+    </div>""", unsafe_allow_html=True)
+with k2:
+    st.markdown(f"""<div class="mcard">
+        <div class="mcard-label">Volatility</div>
+        <div class="mcard-val">{vol:.2f}%</div>
+        <div class="mcard-sub"><span class="regime-tag {vol_cls}">{vol_label}</span></div>
+    </div>""", unsafe_allow_html=True)
+with k3:
+    pnl_cls = "up" if pnl >= 0 else "down"
+    sign = "+" if pnl >= 0 else ""
+    st.markdown(f"""<div class="mcard">
+        <div class="mcard-label">P&L</div>
+        <div class="mcard-val {pnl_cls}">{sign}${pnl:,.2f}</div>
+        <div class="mcard-sub">{sign}{pnl_pct:.2f}%</div>
+    </div>""", unsafe_allow_html=True)
+with k4:
+    st.markdown(f"""<div class="mcard">
+        <div class="mcard-label">Portfolio</div>
+        <div class="mcard-val">${pv:,.2f}</div>
+    </div>""", unsafe_allow_html=True)
+with k5:
+    ratio_str = f"{approved}/{total}" if total else "0/0"
+    st.markdown(f"""<div class="mcard">
+        <div class="mcard-label">Approved / Total</div>
+        <div class="mcard-val">{ratio_str}</div>
+    </div>""", unsafe_allow_html=True)
+with k6:
+    st.markdown(f"""<div class="mcard">
+        <div class="mcard-label">Blocked</div>
+        <div class="mcard-val down">{blocked}</div>
     </div>""", unsafe_allow_html=True)
 
-with m2:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Volatility</div>
-        <div class="metric-value {'red' if vol_pct > 2 else 'amber' if vol_pct > 0.8 else 'green'}">{vol_pct:.2f}%</div>
-        <div style="margin-top:8px;">{vol_badge}</div>
-    </div>""", unsafe_allow_html=True)
 
-with m3:
-    pnl = status.get("pnl", 0) or 0
-    pnl_class = "green" if pnl >= 0 else "red"
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Portfolio P&L</div>
-        <div class="metric-value {pnl_class}">{"+" if pnl >= 0 else ""}${pnl:,.2f}</div>
-    </div>""", unsafe_allow_html=True)
+# ─── row 2: trade log + risk breakdown ───────────────────────────────────────
 
-with m4:
-    pv = status.get("portfolio_value", 100000) or 100000
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Portfolio Value</div>
-        <div class="metric-value">${pv:,.2f}</div>
-    </div>""", unsafe_allow_html=True)
+if logs:
+    st.markdown('<div class="sec-label">Trade Decision Log</div>', unsafe_allow_html=True)
 
-with m5:
-    blocked = status.get("trades_blocked", 0)
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Trades Blocked</div>
-        <div class="metric-value red">{blocked}</div>
-    </div>""", unsafe_allow_html=True)
+    col_log, col_risk = st.columns([3, 2])
 
-with m6:
-    approved = status.get("trades_approved", 0)
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Trades Approved</div>
-        <div class="metric-value green">{approved}</div>
-    </div>""", unsafe_allow_html=True)
+    with col_log:
+        recent = list(reversed(logs[-12:]))
+        rows_html = ""
+        for e in recent:
+            ts = e.get("timestamp", "")
+            try:
+                dt = datetime.fromisoformat(ts)
+                t_str = dt.strftime("%H:%M:%S")
+            except Exception:
+                t_str = "—"
 
-st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+            sig = e["signal"]
+            sig_cls = "td-green" if sig == "BUY" else "td-red" if sig == "SELL" else "td-muted"
+
+            rs = e["risk_score"]
+            rs_100 = round(rs * 100)
+            r_cls = risk_class(rs)
+            r_col = risk_color(rs)
+
+            size = f"${e['price'] * 0.1:,.0f}"
+
+            if not e["approved"]:
+                dec_html = '<span class="td-red">BLOCKED</span>'
+                row_cls = "blocked"
+            elif e["executed"]:
+                dec_html = '<span class="td-green">Approved</span>'
+                row_cls = ""
+            else:
+                dec_html = '<span class="td-muted">Hold</span>'
+                row_cls = ""
+
+            rows_html += f"""<tr class="{row_cls}">
+                <td>{t_str}</td>
+                <td>BTC/USDT</td>
+                <td class="{sig_cls}">{sig}</td>
+                <td><span class="{r_cls}">{rs_100}</span>
+                    <span class="risk-bar-sm"><span class="risk-bar-sm-fill" style="width:{rs_100}%;background:{r_col};"></span></span>
+                </td>
+                <td>{size}</td>
+                <td>{dec_html}</td>
+            </tr>"""
+
+        st.markdown(f"""<table class="tlog-table">
+            <thead><tr>
+                <th>Time</th><th>Ticker</th><th>Signal</th><th>Risk</th><th>Size</th><th>Decision</th>
+            </tr></thead>
+            <tbody>{rows_html}</tbody>
+        </table>""", unsafe_allow_html=True)
+
+    with col_risk:
+        st.markdown('<div class="sec-label">Risk Rules — Live State</div>', unsafe_allow_html=True)
+
+        rb = get("/risk-breakdown")
+        rules = rb.get("rules", []) if "error" not in rb else []
+
+        for rule in rules:
+            pct = min(rule["pct"], 1.0)
+            pct_w = round(pct * 100)
+            col = risk_color(pct)
+            status_tag = rule["status"]
+            s_cls = "regime-extreme" if status_tag in ("Extreme", "Triggered") else \
+                    "regime-elevated" if status_tag in ("Elevated", "Warning", "Active") else "regime-normal"
+
+            st.markdown(f"""<div class="rule-row">
+                <span class="rule-name">{rule['name']}</span>
+                <div class="rule-bar-bg"><div class="rule-bar-fill" style="width:{pct_w}%;background:{col};"></div></div>
+                <span class="rule-vals">{rule['current']} / {rule['limit']}
+                    <span class="regime-tag {s_cls}" style="margin-left:6px;font-size:9px;">{status_tag}</span>
+                </span>
+            </div>""", unsafe_allow_html=True)
+
+        # composite weights
+        weights = rb.get("composite_weights", {})
+        if weights:
+            w_html = " ".join(
+                f'<span style="color:#4b5563;font-size:10px;font-family:JetBrains Mono,monospace;'
+                f'padding:2px 6px;background:#111827;border-radius:3px;margin:2px;">'
+                f'{k} {int(v*100)}%</span>'
+                for k, v in weights.items()
+            )
+            st.markdown(f'<div style="margin-top:12px;">'
+                        f'<span style="font-size:10px;color:#374151;font-weight:600;letter-spacing:0.5px;">WEIGHTS </span>'
+                        f'{w_html}</div>', unsafe_allow_html=True)
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# MAIN: DECISION + RISK GAUGE
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-if latest:
-    col_decision, col_gauge, col_strategy = st.columns([2, 1.5, 1.5])
+    # ─── row 3: charts + blocked summary ─────────────────────────────────────
 
-    # ── Decision Panel ──
-    with col_decision:
-        st.markdown('<div class="section-header">TRADE DECISION</div>', unsafe_allow_html=True)
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-        risk = latest["risk_score"]
-        risk_100 = round(risk * 100)
+    ch1, ch2, ch3 = st.columns([2, 2, 1])
 
-        if not latest["approved"]:
-            reasons_text = ", ".join(latest.get("reasons", ["Risk threshold exceeded"]))
-            capital_at_risk = latest["price"] * 0.1
-            st.markdown(f"""
-            <div class="decision-blocked">
-                <div style="font-size:48px; margin-bottom:8px;">🚨</div>
-                <div class="decision-text" style="color:#ef4444;">TRADE BLOCKED</div>
-                <div class="decision-reason">Reason: {reasons_text}</div>
-                <div class="capital-saved">
-                    AEGIS protected ${capital_at_risk:,.2f} in capital from a dangerous {latest['signal']} trade
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        elif latest.get("executed") and latest["signal"] != "HOLD":
-            st.markdown(f"""
-            <div class="decision-executed">
-                <div style="font-size:48px; margin-bottom:8px;">✅</div>
-                <div class="decision-text" style="color:#10b981;">TRADE EXECUTED</div>
-                <div style="color:#6ee7b7; margin-top:8px; font-size:15px;">
-                    {latest['signal']} via {latest['strategy']} @ ${latest['price']:,.2f}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown(f"""
-            <div class="decision-hold">
-                <div style="font-size:48px; margin-bottom:8px;">⏸️</div>
-                <div class="decision-text" style="color:#64748b;">HOLDING</div>
-                <div style="color:#94a3b8; margin-top:8px; font-size:15px;">
-                    No action — market conditions stable
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+    # equity curve
+    with ch1:
+        st.markdown('<div class="sec-label">Equity Curve</div>', unsafe_allow_html=True)
 
-    # ── Risk Gauge ──
-    with col_gauge:
-        st.markdown('<div class="section-header">RISK FIREWALL</div>', unsafe_allow_html=True)
+        perf = get("/performance-comparison")
+        if perf.get("with_aegis") and len(perf["with_aegis"]) > 2:
+            fig_eq = go.Figure()
+            fig_eq.add_trace(go.Scatter(
+                x=perf["cycles"], y=perf["without_aegis"],
+                mode="lines", name="No Protection",
+                line=dict(color="#ef4444", width=1.5, dash="dot"),
+            ))
+            fig_eq.add_trace(go.Scatter(
+                x=perf["cycles"], y=perf["with_aegis"],
+                mode="lines", name="With AEGIS",
+                line=dict(color="#22c55e", width=2),
+            ))
+            fig_eq = dark_fig(fig_eq, 220)
+            fig_eq.update_xaxes(title_text="Cycle", title_font=dict(size=10, color="#374151"))
+            fig_eq.update_yaxes(title_text="Value ($)", title_font=dict(size=10, color="#374151"))
+            st.plotly_chart(fig_eq, use_container_width=True, config={"displayModeBar": False})
 
-        bar_color = "#ef4444" if risk > threshold else ("#f59e0b" if risk > 0.4 else "#10b981")
-
-        fig_gauge = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=risk_100,
-            number={"suffix": "", "font": {"size": 56, "color": bar_color, "family": "JetBrains Mono"}},
-            gauge={
-                "axis": {"range": [0, 100], "tickwidth": 0, "tickcolor": "#1e293b",
-                         "tickfont": {"color": "#475569", "size": 11}},
-                "bar": {"color": bar_color, "thickness": 0.8},
-                "bgcolor": "#1e293b",
-                "borderwidth": 0,
-                "steps": [
-                    {"range": [0, 35], "color": "rgba(16,185,129,0.08)"},
-                    {"range": [35, 65], "color": "rgba(245,158,11,0.08)"},
-                    {"range": [65, 100], "color": "rgba(239,68,68,0.12)"},
-                ],
-                "threshold": {
-                    "line": {"color": "#ef4444", "width": 3},
-                    "thickness": 0.8,
-                    "value": threshold * 100,
-                },
-            },
-        ))
-        fig_gauge.update_layout(
-            plot_bgcolor="#0b0f19", paper_bgcolor="#0b0f19",
-            height=260, margin=dict(t=30, b=0, l=30, r=30),
-            annotations=[dict(
-                text=f"Threshold: {threshold*100:.0f}",
-                x=0.5, y=-0.05, showarrow=False,
-                font=dict(size=12, color="#ef4444", family="JetBrains Mono"),
-            )]
-        )
-        st.plotly_chart(fig_gauge, use_container_width=True)
-
-    # ── Strategy Panel ──
-    with col_strategy:
-        st.markdown('<div class="section-header">ACTIVE STRATEGY</div>', unsafe_allow_html=True)
-
-        signal_color = "#10b981" if latest["signal"] == "BUY" else "#ef4444" if latest["signal"] == "SELL" else "#64748b"
-        conf_pct = round(latest["confidence"] * 100)
-
-        st.markdown(f"""
-        <div class="metric-card" style="padding:20px;">
-            <div class="metric-label">Strategy</div>
-            <div style="font-size:24px; font-weight:800; color:#f8fafc; margin:8px 0;">
-                {latest['strategy']}
-            </div>
-            <div style="height:1px; background:#1e293b; margin:12px 0;"></div>
-            <div class="metric-label">Signal</div>
-            <div style="font-size:28px; font-weight:900; color:{signal_color}; margin:4px 0;">
-                {latest['signal']}
-            </div>
-            <div style="height:1px; background:#1e293b; margin:12px 0;"></div>
-            <div class="metric-label">Confidence</div>
-            <div style="font-size:22px; font-weight:700; color:#3b82f6; margin:4px 0;">
-                {conf_pct}%
-            </div>
-            <div style="background:#1e293b; border-radius:4px; height:6px; margin-top:8px; overflow:hidden;">
-                <div style="background:#3b82f6; height:100%; width:{conf_pct}%; border-radius:4px;"></div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # CHARTS ROW
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    chart_left, chart_right = st.columns(2)
-
-    # ── Price Chart with Trade Markers ──
-    with chart_left:
-        st.markdown('<div class="section-header">PRICE ACTION & TRADE DECISIONS</div>', unsafe_allow_html=True)
+    # price + risk overlay
+    with ch2:
+        st.markdown('<div class="sec-label">Price & Risk Score</div>', unsafe_allow_html=True)
 
         cycles = [e["cycle"] for e in logs]
         prices = [e["price"] for e in logs]
+        risks = [e["risk_score"] * 100 for e in logs]
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=cycles, y=prices, mode="lines", name="BTC Price",
-            line=dict(color="#3b82f6", width=2),
-            fill="tozeroy", fillcolor="rgba(59,130,246,0.05)",
+        fig_pr = go.Figure()
+        fig_pr.add_trace(go.Scatter(
+            x=cycles, y=prices, mode="lines", name="Price",
+            line=dict(color="#3b82f6", width=1.5), yaxis="y",
         ))
 
-        # Blocked markers (big red X)
+        # blocked markers
         bl_c = [e["cycle"] for e in logs if not e["approved"]]
         bl_p = [e["price"] for e in logs if not e["approved"]]
-        fig.add_trace(go.Scatter(
-            x=bl_c, y=bl_p, mode="markers", name="BLOCKED",
-            marker=dict(color="#ef4444", size=16, symbol="x", line=dict(width=2, color="#ef4444")),
+        if bl_c:
+            fig_pr.add_trace(go.Scatter(
+                x=bl_c, y=bl_p, mode="markers", name="Blocked",
+                marker=dict(color="#ef4444", size=8, symbol="x", line=dict(width=1.5, color="#ef4444")),
+                yaxis="y",
+            ))
+
+        # risk on secondary axis
+        fig_pr.add_trace(go.Scatter(
+            x=cycles, y=risks, mode="lines", name="Risk",
+            line=dict(color="#eab308", width=1, dash="dot"), yaxis="y2",
         ))
 
-        # Executed BUY
-        eb_c = [e["cycle"] for e in logs if e["executed"] and e["signal"] == "BUY"]
-        eb_p = [e["price"] for e in logs if e["executed"] and e["signal"] == "BUY"]
-        fig.add_trace(go.Scatter(
-            x=eb_c, y=eb_p, mode="markers", name="BUY",
-            marker=dict(color="#10b981", size=11, symbol="triangle-up"),
-        ))
-
-        # Executed SELL
-        es_c = [e["cycle"] for e in logs if e["executed"] and e["signal"] == "SELL"]
-        es_p = [e["price"] for e in logs if e["executed"] and e["signal"] == "SELL"]
-        fig.add_trace(go.Scatter(
-            x=es_c, y=es_p, mode="markers", name="SELL",
-            marker=dict(color="#f59e0b", size=11, symbol="triangle-down"),
-        ))
-
-        fig = plotly_dark(fig, 340)
-        fig.update_xaxes(title="Cycle", title_font=dict(color="#475569"))
-        fig.update_yaxes(title="Price (USDT)", title_font=dict(color="#475569"))
-        st.plotly_chart(fig, use_container_width=True)
-
-    # ── Risk Score Timeline ──
-    with chart_right:
-        st.markdown('<div class="section-header">RISK SCORE TIMELINE</div>', unsafe_allow_html=True)
-
-        risk_scores = [e["risk_score"] * 100 for e in logs]
-        colors = ["#ef4444" if r > threshold * 100 else "#f59e0b" if r > 40 else "#10b981" for r in risk_scores]
-
-        fig_risk = go.Figure()
-        fig_risk.add_trace(go.Bar(
-            x=cycles, y=risk_scores, name="Risk",
-            marker_color=colors,
-            marker_line=dict(width=0),
-        ))
-        fig_risk.add_hline(
-            y=threshold * 100, line_dash="dot", line_color="#ef4444", line_width=2,
-            annotation_text=f"BLOCK THRESHOLD ({threshold*100:.0f})",
-            annotation_font=dict(color="#ef4444", size=11),
-            annotation_position="top left",
+        fig_pr = dark_fig(fig_pr, 220)
+        fig_pr.update_layout(
+            yaxis2=dict(
+                overlaying="y", side="right", range=[0, 105],
+                gridcolor="rgba(0,0,0,0)", tickfont=dict(color="#4b5563", size=9),
+                title_text="Risk", title_font=dict(size=10, color="#374151"),
+            ),
+            yaxis=dict(title_text="Price", title_font=dict(size=10, color="#374151")),
+            xaxis=dict(title_text="Cycle", title_font=dict(size=10, color="#374151")),
         )
-        fig_risk = plotly_dark(fig_risk, 340)
-        fig_risk.update_xaxes(title="Cycle", title_font=dict(color="#475569"))
-        fig_risk.update_yaxes(title="Risk Score", title_font=dict(color="#475569"), range=[0, 105])
-        st.plotly_chart(fig_risk, use_container_width=True)
+        st.plotly_chart(fig_pr, use_container_width=True, config={"displayModeBar": False})
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # PERFORMANCE COMPARISON
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    perf = api("/performance-comparison")
-    if perf.get("with_aegis") and len(perf["with_aegis"]) > 2:
-        st.markdown('<div class="section-header">PERFORMANCE — WITH AEGIS vs WITHOUT AEGIS</div>', unsafe_allow_html=True)
+    # blocked summary
+    with ch3:
+        st.markdown('<div class="sec-label">Block Summary</div>', unsafe_allow_html=True)
 
-        fig_perf = go.Figure()
-        fig_perf.add_trace(go.Scatter(
-            x=perf["cycles"], y=perf["without_aegis"],
-            mode="lines", name="Without AEGIS",
-            line=dict(color="#ef4444", width=2, dash="dash"),
-            fill="tozeroy", fillcolor="rgba(239,68,68,0.03)",
-        ))
-        fig_perf.add_trace(go.Scatter(
-            x=perf["cycles"], y=perf["with_aegis"],
-            mode="lines", name="With AEGIS",
-            line=dict(color="#10b981", width=3),
-            fill="tozeroy", fillcolor="rgba(16,185,129,0.05)",
-        ))
-        fig_perf = plotly_dark(fig_perf, 300)
-        fig_perf.update_xaxes(title="Cycle")
-        fig_perf.update_yaxes(title="Portfolio Value ($)")
-        fig_perf.update_layout(
-            legend=dict(x=0.02, y=0.98, font=dict(size=13)),
-        )
+        blocked_entries = [e for e in logs if not e["approved"]]
+        capital_saved = sum(e["price"] * 0.1 for e in blocked_entries)
+        last_reason = ", ".join(blocked_entries[-1]["reasons"]) if blocked_entries else "—"
 
-        # Calculate savings
-        final_with = perf["with_aegis"][-1]
-        final_without = perf["without_aegis"][-1]
-        savings = final_with - final_without
+        st.markdown(f"""<div class="blocked-card">
+            <div class="blocked-label">Capital Protected</div>
+            <div class="blocked-big">${capital_saved:,.0f}</div>
+        </div>""", unsafe_allow_html=True)
 
-        sc1, sc2 = st.columns([3, 1])
-        with sc1:
-            st.plotly_chart(fig_perf, use_container_width=True)
-        with sc2:
-            st.markdown(f"""
-            <div class="metric-card" style="margin-top:20px;">
-                <div class="metric-label">Capital Saved by AEGIS</div>
-                <div class="metric-value green" style="font-size:28px;">
-                    +${max(savings, 0):,.2f}
-                </div>
-                <div style="height:1px; background:#1e293b; margin:16px 0;"></div>
-                <div class="metric-label">With AEGIS</div>
-                <div style="font-size:18px; font-weight:700; color:#10b981;">${final_with:,.2f}</div>
-                <div class="metric-label" style="margin-top:12px;">Without AEGIS</div>
-                <div style="font-size:18px; font-weight:700; color:#ef4444;">${final_without:,.2f}</div>
-            </div>
-            """, unsafe_allow_html=True)
+        st.markdown(f"""<div class="blocked-card" style="margin-top:8px;">
+            <div class="blocked-label">Blocks This Session</div>
+            <div style="font-size:22px;font-weight:700;color:#ef4444;font-family:'JetBrains Mono',monospace;">{len(blocked_entries)}</div>
+        </div>""", unsafe_allow_html=True)
 
-
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # LIVE DECISION LOG
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    st.markdown('<div class="section-header">LIVE DECISION LOG</div>', unsafe_allow_html=True)
-
-    for entry in reversed(logs[-15:]):
-        risk_100 = round(entry["risk_score"] * 100)
-        if not entry["approved"]:
-            icon = "🚫"
-            cls = "blocked"
-            status_text = f'<span style="color:#ef4444;font-weight:700;">BLOCKED</span>'
-            reason = f' — {", ".join(entry.get("reasons", []))}'
-        elif entry["executed"]:
-            icon = "✅"
-            cls = "executed"
-            status_text = f'<span style="color:#10b981;font-weight:700;">EXECUTED</span>'
-            reason = ""
-        else:
-            icon = "⏸️"
-            cls = ""
-            status_text = f'<span style="color:#64748b;font-weight:700;">HOLD</span>'
-            reason = ""
-
-        risk_col = "#ef4444" if risk_100 > 65 else "#f59e0b" if risk_100 > 40 else "#10b981"
-
-        st.markdown(f"""
-        <div class="log-entry {cls}">
-            <span>{icon}</span>
-            <span style="color:#475569;">#{entry['cycle']:03d}</span>
-            <span style="color:#3b82f6; font-weight:600;">{entry['strategy']}</span>
-            <span style="color:{'#10b981' if entry['signal']=='BUY' else '#ef4444' if entry['signal']=='SELL' else '#64748b'}; font-weight:700;">{entry['signal']}</span>
-            <span style="color:#64748b;">@</span>
-            <span style="color:#f8fafc;">${entry['price']:,.2f}</span>
-            <span style="color:#64748b;">|</span>
-            <span style="color:{risk_col}; font-weight:700;">Risk: {risk_100}</span>
-            <span style="color:#64748b;">|</span>
-            {status_text}{reason}
-        </div>
-        """, unsafe_allow_html=True)
+        if blocked_entries:
+            st.markdown(f"""<div class="blocked-card" style="margin-top:8px;">
+                <div class="blocked-label">Last Block Reason</div>
+                <div class="blocked-reason">{last_reason}</div>
+            </div>""", unsafe_allow_html=True)
 
 else:
-    # Empty state
-    st.markdown("""
-    <div style="text-align:center; padding:80px 20px;">
-        <div style="font-size:80px; margin-bottom:20px;">🛡️</div>
-        <div style="font-size:28px; color:#f8fafc; font-weight:700;">AEGIS Ready</div>
-        <div style="color:#64748b; margin-top:12px; font-size:16px;">
-            Click <b>RUN DEMO SCENARIO</b> to see AEGIS protect capital in real-time
+    st.markdown("""<div style="text-align:center;padding:80px 20px;">
+        <div style="font-size:13px;color:#4b5563;font-weight:600;letter-spacing:1px;">NO TRADES YET</div>
+        <div style="color:#374151;margin-top:6px;font-size:12px;">
+            Click <strong>Run Demo</strong> to start the trading simulation.
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+    </div>""", unsafe_allow_html=True)
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# AUTO-RUN LOOP
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-if auto_run:
-    time.sleep(1.5)
-    api("/run-cycle", "POST")
+# ─── auto-run loop ───────────────────────────────────────────────────────────
+
+if auto:
+    time.sleep(2.5)
+    post("/run-cycle")
     st.rerun()
