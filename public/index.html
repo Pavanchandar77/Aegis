@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AEGIS — Autonomous Risk Governor for Trading Agents</title>
+<meta name="description" content="AEGIS: AI-powered autonomous risk governance system protecting trading capital in real-time with deterministic risk evaluation.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ═══ HERO ═══ -->
+<div class="hero">
+  <div class="hero-particles" id="heroParticles"></div>
+  <div class="hero-content">
+    <h1 class="hero-title">AEGIS</h1>
+    <p class="hero-subtitle">Autonomous Risk Governor — Deterministic AI-powered trade firewall protecting capital in real-time</p>
+  </div>
+</div>
+
+<!-- ═══ CONTROLS ═══ -->
+<div class="controls">
+  <button id="btnDemo" class="btn btn-primary" onclick="runDemo()">
+    <span class="btn-icon">🚀</span> RUN DEMO SCENARIO
+  </button>
+  <button id="btnRisk" class="btn btn-secondary" onclick="runRiskScenario()">
+    <span class="btn-icon">⚡</span> RUN RISK SCENARIO
+  </button>
+  <button id="btnCycle" class="btn btn-ghost" onclick="runCycle()">
+    <span class="btn-icon">▶</span> Single Cycle
+  </button>
+  <button id="btnVol" class="btn btn-ghost" onclick="setVolatile()">
+    <span class="btn-icon">🌊</span> Vol Spike
+  </button>
+  <button id="btnReset" class="btn btn-ghost" onclick="resetSystem()">
+    <span class="btn-icon">🔄</span> Reset
+  </button>
+  <label class="toggle-wrap" id="autoToggle">
+    <input type="checkbox" id="autoCheck" onchange="toggleAuto()">
+    <span class="toggle-slider"></span>
+    <span class="toggle-label">Auto</span>
+  </label>
+</div>
+
+<!-- ═══ PIPELINE ═══ -->
+<div class="pipeline" id="pipeline">
+  <div class="pipe-node pipe-agents">
+    <div class="pipe-icon">🤖</div>
+    <div class="pipe-label" style="color:#60a5fa">TRADING AGENTS</div>
+    <div class="pipe-sub">Strategy signals</div>
+  </div>
+  <div class="pipe-arrow"><div class="pipe-dot"></div></div>
+  <div class="pipe-node pipe-aegis">
+    <div class="pipe-icon">🛡️</div>
+    <div class="pipe-label" style="color:#a78bfa">AEGIS ENGINE</div>
+    <div class="pipe-sub" style="color:#c4b5fd">Risk evaluation</div>
+  </div>
+  <div class="pipe-arrow"><div class="pipe-dot" style="animation-delay:.6s"></div></div>
+  <div class="pipe-node pipe-result" id="pipeResult">
+    <div class="pipe-icon" id="pipeResultIcon">🎯</div>
+    <div class="pipe-label" id="pipeResultLabel" style="color:#10b981">EXECUTION</div>
+    <div class="pipe-sub" id="pipeResultSub">Trade deployed</div>
+  </div>
+</div>
+
+<!-- ═══ METRICS ROW ═══ -->
+<div class="metrics-row" id="metricsRow">
+  <div class="metric-card" id="metricPrice">
+    <div class="metric-label">BTC / USDT</div>
+    <div class="metric-value blue" id="valPrice">$0.00</div>
+  </div>
+  <div class="metric-card" id="metricVol">
+    <div class="metric-label">Volatility</div>
+    <div class="metric-value" id="valVol">0.00%</div>
+    <div id="volBadge" class="vol-badge vol-normal" style="margin-top:6px">NORMAL</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Portfolio P&L</div>
+    <div class="metric-value" id="valPnl">$0.00</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Portfolio Value</div>
+    <div class="metric-value" id="valPortfolio">$100,000.00</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Trades Blocked</div>
+    <div class="metric-value red" id="valBlocked">0</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Trades Approved</div>
+    <div class="metric-value green" id="valApproved">0</div>
+  </div>
+</div>
+
+<!-- ═══ MAIN PANELS ═══ -->
+<div class="main-grid" id="mainPanels" style="display:none">
+
+  <!-- Decision Panel -->
+  <div class="panel decision-panel" id="decisionPanel">
+    <div class="section-header">🔥 TRADE DECISION</div>
+    <div id="decisionContent"></div>
+  </div>
+
+  <!-- Risk Gauge -->
+  <div class="panel">
+    <div class="section-header">RISK FIREWALL</div>
+    <div class="gauge-wrap">
+      <canvas id="riskGauge" width="280" height="180"></canvas>
+      <div class="gauge-value" id="gaugeValue">0</div>
+      <div class="gauge-threshold" id="gaugeThreshold">Threshold: 65</div>
+    </div>
+  </div>
+
+  <!-- Decision Signals -->
+  <div class="panel">
+    <div class="section-header">🎯 DECISION SIGNALS</div>
+    <div class="signals-card" id="signalsCard">
+      <div class="signal-bar-wrap">
+        <div class="signal-bar-header">
+          <span>Deterministic Risk <span style="color:#f59e0b">(PRIMARY)</span></span>
+          <span class="signal-bar-val" id="sigRiskVal" style="color:#10b981">0%</span>
+        </div>
+        <div class="signal-bar-track"><div class="signal-bar-fill" id="sigRiskFill"></div></div>
+      </div>
+      <div class="signal-bar-wrap" style="margin-top:12px">
+        <div class="signal-bar-header">
+          <span>Market Condition</span>
+          <span class="signal-bar-val" id="sigMarketVal" style="color:#10b981">0%</span>
+        </div>
+        <div class="signal-bar-track"><div class="signal-bar-fill" id="sigMarketFill"></div></div>
+      </div>
+      <div class="signal-bar-wrap" style="margin-top:12px">
+        <div class="signal-bar-header">
+          <span>AI Confidence <span style="color:#64748b">(ADVISORY)</span></span>
+          <span class="signal-bar-val" id="sigConfVal" style="color:#818cf8">0%</span>
+        </div>
+        <div class="signal-bar-track"><div class="signal-bar-fill" id="sigConfFill" style="background:linear-gradient(90deg,#818cf8,#818cf888)"></div></div>
+      </div>
+      <div class="ai-disclaimer">⚠️ AI ASSISTS — DOES NOT DECIDE. DETERMINISTIC RULES ARE PRIMARY.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ WHAT-IF SIMULATOR ═══ -->
+<div id="whatIfSection" style="display:none">
+  <div class="section-header">🔮 WHAT-IF SIMULATOR — TRADE IMPACT ANALYSIS</div>
+  <div class="whatif-grid">
+    <div class="whatif-card whatif-allowed">
+      <div class="whatif-title" style="color:#10b981">✅ IF TRADE ALLOWED</div>
+      <div class="whatif-row"><span class="whatif-label">Expected Return</span><span class="whatif-val" id="wfReturn" style="color:#10b981">+0%</span></div>
+      <div class="whatif-row"><span class="whatif-label">Worst-Case Loss</span><span class="whatif-val" id="wfLoss" style="color:#ef4444">-0%</span></div>
+      <div class="whatif-row"><span class="whatif-label">Drawdown Impact</span><span class="whatif-val" id="wfDrawdown" style="color:#f59e0b">0%</span></div>
+      <div class="whatif-row" style="border:none"><span class="whatif-label">Volatility Exposure</span><span class="whatif-val" id="wfVolExp" style="color:#94a3b8">0%</span></div>
+    </div>
+    <div class="whatif-card whatif-blocked">
+      <div class="whatif-title" style="color:#ef4444">🚫 IF TRADE BLOCKED</div>
+      <div class="whatif-row"><span class="whatif-label">Loss Avoided</span><span class="whatif-val" id="wfLossAvoided" style="color:#10b981">$0</span></div>
+      <div class="whatif-row"><span class="whatif-label">Capital Preserved</span><span class="whatif-val" id="wfCapital" style="color:#818cf8">$0</span></div>
+      <div class="whatif-row" style="border:none"><span class="whatif-label">Missed Upside</span><span class="whatif-val" id="wfUpside" style="color:#f59e0b">+0%</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CHARTS ═══ -->
+<div class="charts-grid" id="chartsSection" style="display:none">
+  <div class="panel">
+    <div class="section-header">PRICE ACTION & TRADE DECISIONS</div>
+    <canvas id="priceChart" height="300"></canvas>
+  </div>
+  <div class="panel">
+    <div class="section-header">RISK SCORE TIMELINE</div>
+    <canvas id="riskChart" height="300"></canvas>
+  </div>
+</div>
+
+<!-- ═══ LEADERBOARD + PERFORMANCE ═══ -->
+<div class="bottom-grid" id="bottomSection" style="display:none">
+  <div class="panel">
+    <div class="section-header">🏆 AGENT LEADERBOARD</div>
+    <div id="leaderboardContent"></div>
+  </div>
+  <div class="panel">
+    <div class="section-header">AEGIS vs NO AEGIS</div>
+    <canvas id="perfChart" height="260"></canvas>
+    <div class="metric-card" style="margin-top:12px;padding:14px" id="capitalSavedCard">
+      <div class="metric-label">Capital Saved by AEGIS</div>
+      <div class="metric-value green" id="valCapitalSaved">+$0.00</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ENFORCEMENT LOG ═══ -->
+<div id="enforcementSection" style="display:none">
+  <div class="section-header">📋 REAL-TIME ENFORCEMENT LOG</div>
+  <div id="enforcementLog"></div>
+</div>
+
+<!-- ═══ EMPTY STATE ═══ -->
+<div class="empty-state" id="emptyState">
+  <div class="empty-icon">🛡️</div>
+  <div class="empty-title">AEGIS Ready</div>
+  <div class="empty-sub">Click <b style="color:#818cf8">RUN DEMO SCENARIO</b> or <b style="color:#f59e0b">RUN RISK SCENARIO</b> to watch AEGIS protect capital</div>
+</div>
+
+<!-- ═══ API OFFLINE STATE ═══ -->
+<div class="offline-state" id="offlineState" style="display:none">
+  <div class="empty-icon">🛡️</div>
+  <div class="empty-title" style="color:#ef4444">AEGIS API Offline</div>
+  <div class="empty-sub">API is starting up or unavailable. Retrying...</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
