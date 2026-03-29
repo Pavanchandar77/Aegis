@@ -458,7 +458,7 @@ if logs:
                 mode="lines", name="With AEGIS",
                 line=dict(color="#22c55e", width=2),
             ))
-            fig_eq = dark_fig(fig_eq, 180)
+            fig_eq = dark_fig(fig_eq, 50)
             fig_eq.update_xaxes(title_text="Cycle", title_font=dict(size=10, color="#374151"))
             fig_eq.update_yaxes(title_text="Value ($)", title_font=dict(size=10, color="#374151"))
             st.plotly_chart(fig_eq, use_container_width=True, config={"displayModeBar": False})
@@ -493,7 +493,7 @@ if logs:
             line=dict(color="#eab308", width=1, dash="dot"), yaxis="y2",
         ))
 
-        fig_pr = dark_fig(fig_pr, 180)
+        fig_pr = dark_fig(fig_pr, 50)
         fig_pr.update_layout(
             yaxis2=dict(
                 overlaying="y", side="right", range=[0, 105],
