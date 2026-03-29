@@ -531,14 +531,14 @@ if latest:
         f1.add_trace(go.Scatter(x=[e["cycle"] for e in logs if not e["approved"]],y=[e["price"] for e in logs if not e["approved"]],mode="markers",name="BLOCKED",marker=dict(color="#ef4444",size=13,symbol="x",line=dict(width=2,color="#ef4444"))))
         f1.add_trace(go.Scatter(x=[e["cycle"] for e in logs if e["executed"] and e["signal"]=="BUY"],y=[e["price"] for e in logs if e["executed"] and e["signal"]=="BUY"],mode="markers",name="BUY",marker=dict(color="#10b981",size=9,symbol="triangle-up")))
         f1.add_trace(go.Scatter(x=[e["cycle"] for e in logs if e["executed"] and e["signal"]=="SELL"],y=[e["price"] for e in logs if e["executed"] and e["signal"]=="SELL"],mode="markers",name="SELL",marker=dict(color="#f59e0b",size=9,symbol="triangle-down")))
-        st.plotly_chart(pdark(f1,300), use_container_width=True)
+        st.plotly_chart(pdark(f1,220), use_container_width=True)
     with ch2:
         st.markdown('<div class="sh">RISK SCORE TIMELINE</div>', unsafe_allow_html=True)
         rs = [e["risk_score"]*100 for e in logs]
         cs = ["#ef4444" if r>thr*100 else "#f59e0b" if r>40 else "#10b981" for r in rs]
         f2 = go.Figure(go.Bar(x=cycles,y=rs,marker_color=cs,marker_line=dict(width=0)))
         f2.add_hline(y=thr*100,line_dash="dot",line_color="#ef4444",line_width=2,annotation_text=f"BLOCK ({thr*100:.0f})",annotation_font=dict(color="#ef4444",size=10),annotation_position="top left")
-        f2 = pdark(f2,300); f2.update_yaxes(range=[0,105])
+        f2 = pdark(f2,220); f2.update_yaxes(range=[0,105])
         st.plotly_chart(f2, use_container_width=True)
 
     # ━━━━ LEADERBOARD + PERF ━━━━
