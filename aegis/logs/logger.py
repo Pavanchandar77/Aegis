@@ -28,8 +28,11 @@ class AegisLogger:
             "risk_score": risk_result.get("risk_score", 0.0),
             "approved": risk_result.get("approved", False),
             "reasons": risk_result.get("reasons", []),
+            "risk_details": risk_result.get("details", {}),
             "executed": trade_result.get("executed", False),
             "pnl": trade_result.get("pnl", 0.0),
+            "position": trade_result.get("position", 0.0),
+            "cash": trade_result.get("cash", 0.0),
         }
         self.entries.append(entry)
         self._write_to_file()
