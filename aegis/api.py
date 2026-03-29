@@ -273,7 +273,7 @@ def status():
 
 
 @app.get("/logs")
-def logs(last_n: int | None = None):
+def logs(last_n: int = 100):
     return {"logs": governor.logger.get_entries(last_n)}
 
 
@@ -441,7 +441,7 @@ def risk_breakdown():
 
 @app.get("/performance-comparison")
 def performance_comparison():
-    entries = governor.logger.get_entries()
+    entries = governor.logger.get_entries(last_n=100)
     if not entries:
         return {"with_aegis": [], "without_aegis": [], "cycles": []}
 
@@ -533,7 +533,7 @@ def what_if_latest():
 @app.get("/agent-leaderboard")
 def agent_leaderboard():
     """Compute per-agent (strategy) reputation data from trade logs."""
-    logs = governor.logger.get_entries()
+    logs = governor.logger.get_entries(last_n=100)
     strategies = {}
 
     for entry in logs:

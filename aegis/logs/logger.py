@@ -13,6 +13,8 @@ LOG_FILE = os.path.join(LOG_DIR, "aegis_log.json")
 
 
 class AegisLogger:
+    MAX_ENTRIES = 500  # Prevent infinite memory growth
+
     def __init__(self):
         self.entries: list[dict] = []
         os.makedirs(LOG_DIR, exist_ok=True)
@@ -35,6 +37,9 @@ class AegisLogger:
             "cash": trade_result.get("cash", 0.0),
         }
         self.entries.append(entry)
+        # Cap entries to prevent memory bloat
+        if len(self.entries) > self.MAX_ENTRIES:
+            self.entries = self.entries[-self.MAX_ENTRIES:]
         self._write_to_file()
         return entry
 
