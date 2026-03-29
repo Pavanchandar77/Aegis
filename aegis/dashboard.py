@@ -4,7 +4,6 @@ Minimal, working charts for the risk governor dashboard.
 """
 import streamlit as st
 import requests
-import plotly.graph_objects as go
 from datetime import datetime
 
 API = "http://localhost:8000"
@@ -16,7 +15,6 @@ st.markdown("""<style>
 .stApp { background: #0a0e17; color: #c4cad4; }
 header[data-testid="stHeader"] { background: #0a0e17; }
 .block-container { padding: 1rem 2rem 2rem 2rem; max-width: 100%; }
-.js-plotly-plot .plotly .modebar { display: none !important; }
 </style>""", unsafe_allow_html=True)
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -31,17 +29,6 @@ def post(endpoint):
         return requests.post(f"{API}{endpoint}", timeout=10).json()
     except Exception as e:
         return {"error": str(e)}
-
-def dark_fig(fig, h=200):
-    fig.update_layout(
-        plot_bgcolor="#0a0e17", paper_bgcolor="#0a0e17",
-        font=dict(family="Inter, sans-serif", color="#6b7280", size=10),
-        height=h, margin=dict(t=8, b=32, l=48, r=12),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#6b7280", size=9)),
-        xaxis=dict(gridcolor="#1a1f2e", zerolinecolor="#1a1f2e", tickfont=dict(size=9)),
-        yaxis=dict(gridcolor="#1a1f2e", zerolinecolor="#1a1f2e", tickfont=dict(size=9)),
-    )
-    return fig
 
 # ─── Controls ────────────────────────────────────────────────────────────────
 col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
