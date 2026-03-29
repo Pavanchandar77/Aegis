@@ -86,62 +86,6 @@ with m4:
 with m5:
     st.metric("Blocked", status.get('trades_blocked', 0))
 
-# ─── CHARTS SECTION (CLEAN REWRITE) ──────────────────────────────────────────
-st.markdown("---")
-st.markdown("<h4 style='color:#6b7280;margin:10px 0;'>Performance Charts</h4>", unsafe_allow_html=True)
-
-chart_col1, chart_col2 = st.columns(2)
-
-# Chart 1: Equity Curve
-with chart_col1:
-    st.markdown("<p style='color:#4b5563;font-size:12px;margin:0;'>Equity Curve</p>", unsafe_allow_html=True)
-    
-    perf = get("/performance-comparison")
-    if perf and perf.get("with_aegis") and len(perf["with_aegis"]) > 1:
-        fig1 = go.Figure()
-        fig1.add_trace(go.Scatter(
-            x=perf["cycles"], y=perf["with_aegis"],
-            mode="lines", name="With AEGIS",
-            line=dict(color="#22c55e", width=2)
-        ))
-        fig1.add_trace(go.Scatter(
-            x=perf["cycles"], y=perf["without_aegis"],
-            mode="lines", name="No Protection",
-            line=dict(color="#ef4444", width=1.5, dash="dot")
-        ))
-        fig1 = dark_fig(fig1, 180)
-        st.plotly_chart(fig1, use_container_width=True, config={"displayModeBar": False})
-    else:
-        st.info("Run demo to see equity curve")
-
-# Chart 2: Price & Risk
-with chart_col2:
-    st.markdown("<p style='color:#4b5563;font-size:12px;margin:0;'>Price & Risk Score</p>", unsafe_allow_html=True)
-    
-    if logs:
-        cycles = [e["cycle"] for e in logs]
-        prices = [e["price"] for e in logs]
-        risks = [e.get("risk_score", 0) * 100 for e in logs]
-        
-        fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(
-            x=cycles, y=prices, mode="lines", name="Price",
-            line=dict(color="#3b82f6", width=1.5), yaxis="y"
-        ))
-        fig2.add_trace(go.Scatter(
-            x=cycles, y=risks, mode="lines", name="Risk %",
-            line=dict(color="#eab308", width=1, dash="dot"), yaxis="y2"
-        ))
-        
-        fig2 = dark_fig(fig2, 180)
-        fig2.update_layout(
-            yaxis2=dict(overlaying="y", side="right", range=[0, 100], tickfont=dict(size=8)),
-            legend=dict(x=0.02, y=0.98)
-        )
-        st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
-    else:
-        st.info("No trade data yet")
-
 # ─── Trade Log ───────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown("<h4 style='color:#6b7280;margin:10px 0;'>Recent Trades</h4>", unsafe_allow_html=True)
