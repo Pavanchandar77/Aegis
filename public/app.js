@@ -4,9 +4,6 @@
 
 const API = window.location.origin + '/api';
 let autoInterval = null;
-let priceChartInstance = null;
-let riskChartInstance = null;
-let perfChartInstance = null;
 let logsData = [];
 let isLoading = false;
 
@@ -145,7 +142,6 @@ async function refresh() {
     updateGauge(latest.risk_score, status.risk_threshold || 0.65);
     updateSignals(latest, status);
     updateWhatIf(whatIf);
-    updateCharts(logsData, status.risk_threshold || 0.65);
     updateLeaderboard(leaderboard);
     updatePerformance(perf);
     updateEnforcementLog(logsData);
@@ -357,154 +353,6 @@ function updateWhatIf(wf) {
   document.getElementById('wfUpside').textContent = '+' + ib.missed_upside_pct + '%';
 }
 
-function updateCharts(logs, threshold) {
-  const cycles = logs.map(e => e.cycle);
-  const prices = logs.map(e => e.price);
-  const risks = logs.map(e => Math.round(e.risk_score * 100));
-  const thr100 = Math.round(threshold * 100);
-
-  // ── Price Chart ──
-  const priceCtx = document.getElementById('priceChart').getContext('2d');
-  if (priceChartInstance) priceChartInstance.destroy();
-
-  const blockedIdx = logs.map((e, i) => !e.approved ? i : null).filter(i => i !== null);
-  const buyIdx = logs.map((e, i) => e.executed && e.signal === 'BUY' ? i : null).filter(i => i !== null);
-  const sellIdx = logs.map((e, i) => e.executed && e.signal === 'SELL' ? i : null).filter(i => i !== null);
-
-  const blockedData = new Array(logs.length).fill(null);
-  blockedIdx.forEach(i => blockedData[i] = prices[i]);
-  const buyData = new Array(logs.length).fill(null);
-  buyIdx.forEach(i => buyData[i] = prices[i]);
-  const sellData = new Array(logs.length).fill(null);
-  sellIdx.forEach(i => sellData[i] = prices[i]);
-
-  priceChartInstance = new Chart(priceCtx, {
-    type: 'line',
-    data: {
-      labels: cycles,
-      datasets: [
-        {
-          label: 'BTC',
-          data: prices,
-          borderColor: '#818cf8',
-          backgroundColor: 'rgba(99,102,241,.06)',
-          fill: true,
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.3,
-        },
-        {
-          label: 'BLOCKED',
-          data: blockedData,
-          borderColor: 'transparent',
-          backgroundColor: '#ef4444',
-          pointStyle: 'crossRot',
-          pointRadius: 10,
-          pointBorderWidth: 2,
-          pointBorderColor: '#ef4444',
-          showLine: false,
-        },
-        {
-          label: 'BUY',
-          data: buyData,
-          borderColor: 'transparent',
-          backgroundColor: '#10b981',
-          pointStyle: 'triangle',
-          pointRadius: 7,
-          showLine: false,
-        },
-        {
-          label: 'SELL',
-          data: sellData,
-          borderColor: 'transparent',
-          backgroundColor: '#f59e0b',
-          pointStyle: 'triangle',
-          pointRadius: 7,
-          pointRotation: 180,
-          showLine: false,
-        },
-      ],
-    },
-    options: chartOpts(),
-  });
-
-  // ── Risk Chart ──
-  const riskCtx = document.getElementById('riskChart').getContext('2d');
-  if (riskChartInstance) riskChartInstance.destroy();
-
-  const riskColors = risks.map(r => r > thr100 ? '#ef4444' : r > 40 ? '#f59e0b' : '#10b981');
-
-  riskChartInstance = new Chart(riskCtx, {
-    type: 'bar',
-    data: {
-      labels: cycles,
-      datasets: [{
-        label: 'Risk Score',
-        data: risks,
-        backgroundColor: riskColors,
-        borderRadius: 2,
-        barPercentage: 0.9,
-      }],
-    },
-    options: {
-      ...chartOpts(),
-      scales: {
-        ...chartOpts().scales,
-        y: {
-          ...chartOpts().scales.y,
-          max: 105,
-        },
-      },
-      plugins: {
-        ...chartOpts().plugins,
-        annotation: undefined,
-      },
-    },
-    plugins: [{
-      id: 'thresholdLine',
-      afterDraw(chart) {
-        const yScale = chart.scales.y;
-        const y = yScale.getPixelForValue(thr100);
-        const ctx = chart.ctx;
-        ctx.save();
-        ctx.beginPath();
-        ctx.setLineDash([5, 5]);
-        ctx.moveTo(chart.chartArea.left, y);
-        ctx.lineTo(chart.chartArea.right, y);
-        ctx.strokeStyle = '#ef4444';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.fillStyle = '#ef4444';
-        ctx.font = '10px JetBrains Mono';
-        ctx.fillText(`BLOCK (${thr100})`, chart.chartArea.left + 4, y - 6);
-        ctx.restore();
-      },
-    }],
-  });
-}
-
-function chartOpts() {
-  return {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        labels: { color: '#94a3b8', font: { family: 'Inter', size: 11 } },
-      },
-    },
-    scales: {
-      x: {
-        ticks: { color: '#475569', font: { size: 10 } },
-        grid: { color: '#111827' },
-      },
-      y: {
-        ticks: { color: '#475569', font: { size: 10 } },
-        grid: { color: '#111827' },
-      },
-    },
-  };
-}
-
 function updateLeaderboard(lb) {
   const agents = lb.agents || [];
   const container = document.getElementById('leaderboardContent');
@@ -540,40 +388,6 @@ function updateLeaderboard(lb) {
 
 function updatePerformance(perf) {
   if (!perf || !perf.with_aegis || perf.with_aegis.length < 2) return;
-
-  const ctx = document.getElementById('perfChart').getContext('2d');
-  if (perfChartInstance) perfChartInstance.destroy();
-
-  perfChartInstance = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: perf.cycles,
-      datasets: [
-        {
-          label: 'Without AEGIS',
-          data: perf.without_aegis,
-          borderColor: '#ef4444',
-          backgroundColor: 'rgba(239,68,68,.04)',
-          borderDash: [5, 5],
-          borderWidth: 2,
-          fill: true,
-          pointRadius: 0,
-          tension: 0.3,
-        },
-        {
-          label: 'With AEGIS',
-          data: perf.with_aegis,
-          borderColor: '#10b981',
-          backgroundColor: 'rgba(16,185,129,.06)',
-          borderWidth: 3,
-          fill: true,
-          pointRadius: 0,
-          tension: 0.3,
-        },
-      ],
-    },
-    options: chartOpts(),
-  });
 
   const saved = perf.with_aegis[perf.with_aegis.length - 1] - perf.without_aegis[perf.without_aegis.length - 1];
   document.getElementById('valCapitalSaved').textContent = '+$' + fmt(Math.max(saved, 0));
