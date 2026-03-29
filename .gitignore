@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 trade_logs/
 .env
+.venv/
+.vercel/
+node_modules/
