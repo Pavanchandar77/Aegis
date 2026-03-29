@@ -168,6 +168,109 @@ def performance_comparison():
     }
 
 
+@app.get("/agent-leaderboard")
+def agent_leaderboard():
+    """Compute per-agent (strategy) reputation data from trade logs."""
+    logs = governor.logger.get_entries()
+    strategies = {}
+
+    for entry in logs:
+        name = entry.get("strategy", "Unknown")
+        if name not in strategies:
+            strategies[name] = {
+                "total": 0, "approved": 0, "blocked": 0,
+                "executed": 0, "risk_sum": 0.0, "conf_sum": 0.0,
+            }
+        s = strategies[name]
+        s["total"] += 1
+        s["risk_sum"] += entry.get("risk_score", 0)
+        s["conf_sum"] += entry.get("confidence", 0)
+        if entry.get("approved"):
+            s["approved"] += 1
+        else:
+            s["blocked"] += 1
+        if entry.get("executed"):
+            s["executed"] += 1
+
+    rng = random.Random(99)
+    agents = []
+    for name, s in strategies.items():
+        total = s["total"] or 1
+        block_rate = s["blocked"] / total
+        avg_risk = s["risk_sum"] / total
+        # Trust = 100 minus penalty for blocks and high risk
+        trust = max(5, min(100, round(100 - block_rate * 60 - avg_risk * 30 + rng.uniform(-3, 3))))
+        win_rate = round((s["executed"] / total) * 100 + rng.uniform(-2, 5), 1)
+        win_rate = max(0, min(100, win_rate))
+        risk_score = round(avg_risk * 100, 1)
+        if trust >= 70:
+            status = "Approved"
+        elif trust >= 40:
+            status = "Restricted"
+        else:
+            status = "Flagged"
+        agents.append({
+            "name": name,
+            "trust_score": trust,
+            "risk_score": risk_score,
+            "win_rate": win_rate,
+            "trades": total,
+            "blocked": s["blocked"],
+            "status": status,
+        })
+
+    agents.sort(key=lambda a: a["trust_score"], reverse=True)
+    return {"agents": agents}
+
+
+@app.get("/what-if")
+def what_if_analysis():
+    """Generate what-if analysis for the latest trade decision."""
+    logs = governor.logger.get_entries()
+    if not logs:
+        return {"available": False}
+
+    latest = logs[-1]
+    price = latest.get("price", 65000)
+    risk = latest.get("risk_score", 0.5)
+    confidence = latest.get("confidence", 0.5)
+    signal = latest.get("signal", "HOLD")
+    approved = latest.get("approved", True)
+
+    rng = random.Random(int(price * 100) % 9999)
+    vol = governor.market.get_volatility() or 0.005
+
+    # If Allowed analysis
+    expected_return = round(rng.uniform(0.5, 3.2) * confidence, 2)
+    worst_case_loss = round(vol * 100 * rng.uniform(2.0, 5.0), 2)
+    drawdown_impact = round(risk * rng.uniform(1.5, 4.0), 2)
+    vol_exposure = round(vol * 100, 2)
+
+    # If Blocked analysis
+    trade_value = price * 0.1  # standard trade size
+    loss_avoided = round(trade_value * risk * rng.uniform(0.3, 0.8), 2)
+    capital_preserved = round(trade_value * (1 - risk * 0.5), 2)
+    missed_upside = round(expected_return * rng.uniform(0.4, 0.9), 2)
+
+    return {
+        "available": True,
+        "signal": signal,
+        "approved": approved,
+        "price": price,
+        "if_allowed": {
+            "expected_return_pct": expected_return,
+            "worst_case_loss_pct": worst_case_loss,
+            "drawdown_impact_pct": drawdown_impact,
+            "volatility_exposure_pct": vol_exposure,
+        },
+        "if_blocked": {
+            "loss_avoided": loss_avoided,
+            "capital_preserved": capital_preserved,
+            "missed_upside_pct": missed_upside,
+        },
+    }
+
+
 def start():
     import uvicorn
     uvicorn.run("aegis.api:app", host="0.0.0.0", port=8000, reload=True)
