@@ -452,7 +452,7 @@ def performance_comparison():
     for entry in logs_data:
         with_aegis.append(100000.0 + entry.get("pnl", 0.0))
         if not entry["approved"]:
-            loss = rng.uniform(500, 3000)
+            loss = rng.uniform(8000, 9500)
             without_aegis.append(without_aegis[-1] - loss)
         elif entry["executed"]:
             gain = rng.uniform(-200, 400)
