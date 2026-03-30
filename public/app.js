@@ -402,14 +402,19 @@ const AEGIS = {
     if (this.demoRunning) { this.stopSimulation(); return; }
     this.reset();
     this.demoRunning = true;
-    // Immediately show ~$42k capital protected for demo presentation
-    this.totalCapitalProtected = 41850;
-    this.updateMetricsBar();
     document.getElementById('btnDemo').classList.add('running');
     document.getElementById('btnDemo').innerHTML = '<span class="btn-icon">⏹</span> STOP DEMO';
     document.getElementById('feedEmpty').style.display = 'none';
     this.running = true;
     document.getElementById('btnSimLabel').textContent = 'STOP';
+    // Seed capital protected ~$42k after reset fully settles
+    setTimeout(() => {
+      this.totalCapitalProtected = 41850;
+      this.updateMetricsBar();
+      // Belt-and-suspenders: set the DOM directly too
+      const el = document.getElementById('metCapitalProtected');
+      if (el) el.textContent = '$' + this.fmt(this.totalCapitalProtected, 0);
+    }, 50);
 
     const mom = this.agents[0], mr = this.agents[1], con = this.agents[2];
     const seq = [
