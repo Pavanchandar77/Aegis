@@ -1,444 +1,500 @@
 /* ═══════════════════════════════════════════════════════════════
-   AEGIS — Premium Dashboard Application Logic
+   AEGIS UI — Dashboard controller, animations, demo mode
+   Depends on engine.js (loaded first)
    ═══════════════════════════════════════════════════════════════ */
 
-const API = window.location.origin + '/api';
-let autoInterval = null;
-let logsData = [];
-let isLoading = false;
+const AEGIS = {
+  prices: new PriceEngine(),
+  agents: [new MomentumAgent(), new MeanRevAgent(), new ConservativeAgent()],
+  risk: new RiskEngine(),
+  reputation: new ReputationSystem(),
+  erc: new ERC8004Registry(),
+  decisions: [],
+  running: false,
+  demoRunning: false,
+  priceInterval: null,
+  agentTimers: {},
+  startTime: Date.now(),
+  totalCapitalProtected: 0,
 
-// ═══ HERO PARTICLES ═══
-(function initParticles() {
-  const container = document.getElementById('heroParticles');
-  if (!container) return;
-  for (let i = 0; i < 20; i++) {
-    const p = document.createElement('div');
-    p.className = 'particle';
-    p.style.left = Math.random() * 100 + '%';
-    p.style.top = Math.random() * 100 + '%';
-    p.style.animationDelay = Math.random() * 4 + 's';
-    p.style.animationDuration = (3 + Math.random() * 3) + 's';
-    p.style.opacity = Math.random() * 0.5 + 0.1;
-    container.appendChild(p);
-  }
-})();
+  // ── Initialize ──
+  init() {
+    this.agents.forEach(a => this.erc.registerAgent(a));
+    this.renderAgentCards();
+    this.updatePriceTickers();
+    this.updateMetricsBar();
+    this.renderERC();
+    this.drawGauge(0);
+    this.startPriceTicker();
+  },
 
-// ═══ API HELPERS ═══
-async function api(endpoint, method = 'GET') {
-  try {
-    const opts = { method };
-    const resp = await fetch(`${API}${endpoint}`, opts);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    return await resp.json();
-  } catch (e) {
-    console.error('API Error:', e);
-    return { error: e.message };
-  }
-}
+  // ── Price Ticker (always runs) ──
+  startPriceTicker() {
+    if (this.priceInterval) return;
+    this.priceInterval = setInterval(() => {
+      this.prices.tick();
+      this.updatePriceTickers();
+      this.updateMetricsBar();
+    }, 5000);
+  },
 
-function setLoading(btn, loading) {
-  if (!btn) return;
-  if (loading) {
-    btn.disabled = true;
-    btn._origHTML = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner"></span>Running...';
-  } else {
-    btn.disabled = false;
-    if (btn._origHTML) btn.innerHTML = btn._origHTML;
-  }
-}
+  // ── Simulation Control ──
+  toggleSimulation() {
+    if (this.running) this.stopSimulation();
+    else this.startSimulation();
+  },
+  startSimulation() {
+    this.running = true;
+    document.getElementById('btnSimLabel').textContent = 'STOP';
+    document.getElementById('feedEmpty').style.display = 'none';
+    this.agents.forEach(a => {
+      this._scheduleAgent(a);
+    });
+  },
+  stopSimulation() {
+    this.running = false;
+    this.demoRunning = false;
+    document.getElementById('btnSimLabel').textContent = 'START';
+    document.getElementById('btnDemo').classList.remove('running');
+    document.getElementById('btnDemo').innerHTML = '<span class="btn-icon">🚀</span> DEMO MODE';
+    Object.values(this.agentTimers).forEach(t => clearTimeout(t));
+    this.agentTimers = {};
+  },
+  _scheduleAgent(agent) {
+    if (!this.running) return;
+    const delay = agent.nextTradeIn;
+    this.agentTimers[agent.id] = setTimeout(() => {
+      this._agentTick(agent);
+      agent.nextTradeIn = agent._randInterval();
+      this._scheduleAgent(agent);
+    }, delay);
+  },
+  _agentTick(agent) {
+    agent.checkUnsuspend();
+    if (agent.isSuspended()) { this.renderAgentCards(); return; }
+    const proposal = agent.generateProposal(this.prices);
+    if (!proposal) return;
+    this.processProposal(proposal, agent);
+  },
 
-// ═══ ACTIONS ═══
-async function runDemo() {
-  const btn = document.getElementById('btnDemo');
-  setLoading(btn, true);
-  await api('/demo-scenario', 'POST');
-  await refresh();
-  setLoading(btn, false);
-}
-
-async function runRiskScenario() {
-  const btn = document.getElementById('btnRisk');
-  setLoading(btn, true);
-  await api('/set-volatile?volatile=false', 'POST');
-  await api('/run-cycle', 'POST');
-  await api('/run-cycle', 'POST');
-  await api('/set-volatile?volatile=true', 'POST');
-  await api('/run-cycle', 'POST');
-  await api('/run-cycle', 'POST');
-  await api('/run-cycle', 'POST');
-  await refresh();
-  setLoading(btn, false);
-}
-
-async function runCycle() {
-  const btn = document.getElementById('btnCycle');
-  setLoading(btn, true);
-  await api('/run-cycle', 'POST');
-  await refresh();
-  setLoading(btn, false);
-}
-
-async function setVolatile() {
-  await api('/set-volatile?volatile=true', 'POST');
-  await refresh();
-}
-
-async function resetSystem() {
-  await api('/reset', 'POST');
-  logsData = [];
-  await refresh();
-}
-
-function toggleAuto() {
-  const checked = document.getElementById('autoCheck').checked;
-  if (checked) {
-    autoInterval = setInterval(async () => {
-      await api('/run-cycle', 'POST');
-      await refresh();
-    }, 1500);
-  } else {
-    clearInterval(autoInterval);
-    autoInterval = null;
-  }
-}
-
-// ═══ MAIN REFRESH ═══
-async function refresh() {
-  if (isLoading) return;
-  isLoading = true;
-
-  const [status, logsResp, whatIf, leaderboard, perf] = await Promise.all([
-    api('/status'),
-    api('/logs?last_n=50'),
-    api('/what-if'),
-    api('/agent-leaderboard'),
-    api('/performance-comparison'),
-  ]);
-
-  if (status.error) {
-    document.getElementById('emptyState').style.display = 'none';
-    document.getElementById('offlineState').style.display = 'block';
-    isLoading = false;
-    return;
-  }
-
-  document.getElementById('offlineState').style.display = 'none';
-  logsData = logsResp.logs || [];
-  const latest = logsData.length > 0 ? logsData[logsData.length - 1] : null;
-
-  updateMetrics(status);
-  updatePipeline(latest);
-
-  if (latest) {
-    document.getElementById('emptyState').style.display = 'none';
-    document.getElementById('mainPanels').style.display = 'grid';
-    document.getElementById('whatIfSection').style.display = 'block';
-    document.getElementById('chartsSection').style.display = 'grid';
-    document.getElementById('bottomSection').style.display = 'grid';
-    document.getElementById('enforcementSection').style.display = 'block';
-
-    updateDecision(latest, status.risk_threshold || 0.65);
-    updateGauge(latest.risk_score, status.risk_threshold || 0.65);
-    updateSignals(latest, status);
-    updateWhatIf(whatIf);
-    updateLeaderboard(leaderboard);
-    updatePerformance(perf);
-    updateEnforcementLog(logsData);
-  } else {
-    document.getElementById('emptyState').style.display = 'block';
-    document.getElementById('mainPanels').style.display = 'none';
-    document.getElementById('whatIfSection').style.display = 'none';
-    document.getElementById('chartsSection').style.display = 'none';
-    document.getElementById('bottomSection').style.display = 'none';
-    document.getElementById('enforcementSection').style.display = 'none';
-  }
-
-  isLoading = false;
-}
-
-// ═══ UPDATE FUNCTIONS ═══
-function fmt(n, d = 2) {
-  return new Intl.NumberFormat('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }).format(n);
-}
-
-function updateMetrics(s) {
-  const price = s.current_price || 0;
-  const vol = (s.volatility || 0) * 100;
-  const pnl = s.pnl || 0;
-  const portfolio = s.portfolio_value || 100000;
-
-  document.getElementById('valPrice').textContent = '$' + fmt(price);
-  document.getElementById('valVol').textContent = fmt(vol) + '%';
-  document.getElementById('valVol').className = 'metric-value ' + (vol > 2 ? 'red' : vol > 0.8 ? 'amber' : 'green');
-
-  const vb = document.getElementById('volBadge');
-  if (vol > 2) { vb.textContent = 'EXTREME'; vb.className = 'vol-badge vol-extreme'; }
-  else if (vol > 0.8) { vb.textContent = 'ELEVATED'; vb.className = 'vol-badge vol-elevated'; }
-  else { vb.textContent = 'NORMAL'; vb.className = 'vol-badge vol-normal'; }
-
-  const pnlEl = document.getElementById('valPnl');
-  pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + fmt(pnl);
-  pnlEl.className = 'metric-value ' + (pnl >= 0 ? 'green' : 'red');
-
-  document.getElementById('valPortfolio').textContent = '$' + fmt(portfolio);
-  document.getElementById('valBlocked').textContent = s.trades_blocked || 0;
-  document.getElementById('valApproved').textContent = s.trades_approved || 0;
-}
-
-function updatePipeline(latest) {
-  const node = document.getElementById('pipeResult');
-  const icon = document.getElementById('pipeResultIcon');
-  const label = document.getElementById('pipeResultLabel');
-  const sub = document.getElementById('pipeResultSub');
-
-  if (!latest) {
-    node.className = 'pipe-node pipe-result approved';
-    icon.textContent = '🎯';
-    label.textContent = 'EXECUTION';
-    label.style.color = '#10b981';
-    sub.textContent = 'Trade deployed';
-    return;
-  }
-
-  if (!latest.approved) {
-    node.className = 'pipe-node pipe-result blocked';
-    icon.textContent = '🚫';
-    label.textContent = 'BLOCKED';
-    label.style.color = '#ef4444';
-    sub.textContent = 'Trade rejected';
-  } else if (latest.executed && latest.signal !== 'HOLD') {
-    node.className = 'pipe-node pipe-result approved';
-    icon.textContent = '🎯';
-    label.textContent = 'EXECUTION';
-    label.style.color = '#10b981';
-    sub.textContent = latest.signal + ' executed';
-  } else {
-    node.className = 'pipe-node pipe-result approved';
-    icon.textContent = '⏸️';
-    label.textContent = 'HOLDING';
-    label.style.color = '#64748b';
-    sub.textContent = 'No action';
-  }
-}
-
-function updateDecision(latest, threshold) {
-  const container = document.getElementById('decisionContent');
-  const r100 = Math.round(latest.risk_score * 100);
-
-  if (!latest.approved) {
-    const reasons = (latest.reasons || ['Risk threshold exceeded']).map(r => `<div class="decision-reason">⛔ ${r}</div>`).join('');
-    const cap = (latest.price * 0.1).toFixed(2);
-    container.innerHTML = `
-      <div class="decision-blocked">
-        <div class="decision-icon">🚨</div>
-        <div class="decision-title" style="color:#ef4444">TRADE BLOCKED</div>
-        <div class="decision-detail" style="color:#fca5a5">${latest.strategy} — ${latest.signal} @ $${fmt(latest.price)}</div>
-        <div style="margin-top:10px;text-align:left">${reasons}</div>
-        <div class="capital-badge"><span>🛡️ AEGIS protected $${fmt(parseFloat(cap))} in capital</span></div>
-      </div>`;
-  } else if (latest.executed && latest.signal !== 'HOLD') {
-    container.innerHTML = `
-      <div class="decision-approved">
-        <div class="decision-icon">✅</div>
-        <div class="decision-title" style="color:#10b981">TRADE APPROVED</div>
-        <div style="color:#6ee7b7;margin-top:6px;font-size:13px;font-weight:600">${latest.signal} via ${latest.strategy} @ $${fmt(latest.price)}</div>
-        <div style="margin-top:8px;padding:6px 12px;background:rgba(16,185,129,.08);border-radius:8px;display:inline-block">
-          <span style="color:#6ee7b7;font-size:11px">Risk: ${r100} — Safe ✓</span>
-        </div>
-      </div>`;
-  } else {
-    container.innerHTML = `
-      <div class="decision-hold">
-        <div class="decision-icon">⏸️</div>
-        <div class="decision-title" style="color:#64748b">HOLDING</div>
-        <div style="color:#94a3b8;margin-top:6px;font-size:13px">No action — market stable</div>
-      </div>`;
-  }
-}
-
-function updateGauge(riskScore, threshold) {
-  const canvas = document.getElementById('riskGauge');
-  const ctx = canvas.getContext('2d');
-  const r100 = Math.round(riskScore * 100);
-  const thr100 = Math.round(threshold * 100);
-
-  const w = canvas.width, h = canvas.height;
-  const cx = w / 2, cy = h - 20;
-  const radius = Math.min(w, h) - 40;
-
-  ctx.clearRect(0, 0, w, h);
-
-  // Background arc
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, Math.PI, 2 * Math.PI, false);
-  ctx.lineWidth = 16;
-  ctx.strokeStyle = '#111827';
-  ctx.stroke();
-
-  // Color zones
-  const zones = [
-    { end: 0.35, color: 'rgba(16,185,129,.15)' },
-    { end: 0.65, color: 'rgba(245,158,11,.15)' },
-    { end: 1.0, color: 'rgba(239,68,68,.15)' },
-  ];
-  let prevEnd = 0;
-  zones.forEach(z => {
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, Math.PI + prevEnd * Math.PI, Math.PI + z.end * Math.PI, false);
-    ctx.lineWidth = 16;
-    ctx.strokeStyle = z.color;
-    ctx.stroke();
-    prevEnd = z.end;
-  });
-
-  // Value arc
-  const color = r100 > thr100 ? '#ef4444' : r100 > 40 ? '#f59e0b' : '#10b981';
-  const angle = Math.PI + (r100 / 100) * Math.PI;
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, Math.PI, angle, false);
-  ctx.lineWidth = 16;
-  ctx.strokeStyle = color;
-  ctx.lineCap = 'round';
-  ctx.stroke();
-
-  // Threshold marker
-  const thrAngle = Math.PI + (thr100 / 100) * Math.PI;
-  const thrX = cx + radius * Math.cos(thrAngle);
-  const thrY = cy + radius * Math.sin(thrAngle);
-  ctx.beginPath();
-  ctx.arc(thrX, thrY, 4, 0, 2 * Math.PI);
-  ctx.fillStyle = '#ef4444';
-  ctx.fill();
-
-  const gaugeVal = document.getElementById('gaugeValue');
-  gaugeVal.textContent = r100;
-  gaugeVal.style.color = color;
-}
-
-function updateSignals(latest, status) {
-  const r100 = Math.round(latest.risk_score * 100);
-  const vp = ((status.volatility || 0) * 100);
-  const mf = Math.min(100, Math.max(5, Math.round(vp * 20 + (Math.random() * 15 - 5))));
-  const ac = Math.round(latest.confidence * 100);
-
-  const dcColor = r100 > 65 ? '#ef4444' : r100 > 40 ? '#f59e0b' : '#10b981';
-  const mcColor = mf > 60 ? '#ef4444' : mf > 35 ? '#f59e0b' : '#10b981';
-
-  document.getElementById('sigRiskVal').textContent = r100 + '%';
-  document.getElementById('sigRiskVal').style.color = dcColor;
-  document.getElementById('sigRiskFill').style.width = r100 + '%';
-  document.getElementById('sigRiskFill').style.background = `linear-gradient(90deg,${dcColor},${dcColor}88)`;
-
-  document.getElementById('sigMarketVal').textContent = mf + '%';
-  document.getElementById('sigMarketVal').style.color = mcColor;
-  document.getElementById('sigMarketFill').style.width = mf + '%';
-  document.getElementById('sigMarketFill').style.background = `linear-gradient(90deg,${mcColor},${mcColor}88)`;
-
-  document.getElementById('sigConfVal').textContent = ac + '%';
-  document.getElementById('sigConfFill').style.width = ac + '%';
-}
-
-function updateWhatIf(wf) {
-  if (!wf || !wf.available) return;
-  const ia = wf.if_allowed;
-  const ib = wf.if_blocked;
-
-  document.getElementById('wfReturn').textContent = '+' + ia.expected_return_pct + '%';
-  document.getElementById('wfLoss').textContent = '-' + ia.worst_case_loss_pct + '%';
-  document.getElementById('wfDrawdown').textContent = ia.drawdown_impact_pct + '%';
-  document.getElementById('wfVolExp').textContent = ia.volatility_exposure_pct + '%';
-  document.getElementById('wfLossAvoided').textContent = '$' + fmt(ib.loss_avoided);
-  document.getElementById('wfCapital').textContent = '$' + fmt(ib.capital_preserved);
-  document.getElementById('wfUpside').textContent = '+' + ib.missed_upside_pct + '%';
-}
-
-function updateLeaderboard(lb) {
-  const agents = lb.agents || [];
-  const container = document.getElementById('leaderboardContent');
-  container.innerHTML = agents.map((a, i) => {
-    const tc = a.trust_score >= 70 ? '#10b981' : a.trust_score >= 40 ? '#f59e0b' : '#ef4444';
-    const rc = a.risk_score > 50 ? '#ef4444' : a.risk_score > 30 ? '#f59e0b' : '#10b981';
-    const bc = a.status === 'Approved' ? 'badge-approved' : a.status === 'Restricted' ? 'badge-restricted' : 'badge-flagged';
-    return `
-      <div class="agent-row" style="animation-delay:${i * 0.08}s">
-        <div class="agent-rank">#${i + 1}</div>
-        <div class="agent-name">🤖 ${a.name}</div>
-        <div class="agent-stat">
-          <div class="agent-stat-val" style="color:${tc}">${a.trust_score}</div>
-          <div class="agent-stat-label">Trust</div>
-          <div class="trust-bar"><div class="trust-fill" style="width:${a.trust_score}%;background:${tc}"></div></div>
-        </div>
-        <div class="agent-stat">
-          <div class="agent-stat-val" style="color:${rc}">${a.risk_score}</div>
-          <div class="agent-stat-label">Risk</div>
-        </div>
-        <div class="agent-stat">
-          <div class="agent-stat-val" style="color:#818cf8">${a.win_rate}%</div>
-          <div class="agent-stat-label">Win</div>
-        </div>
-        <div class="agent-stat">
-          <div class="agent-stat-val" style="color:#94a3b8">${a.trades}</div>
-          <div class="agent-stat-label">Trades</div>
-        </div>
-        <div><span class="badge ${bc}">${a.status.toUpperCase()}</span></div>
-      </div>`;
-  }).join('');
-}
-
-function updatePerformance(perf) {
-  if (!perf || !perf.with_aegis || perf.with_aegis.length < 2) return;
-
-  // Fake demo data logic: User explicitly requested ~42k savings.
-  let saved = perf.with_aegis[perf.with_aegis.length - 1] - perf.without_aegis[perf.without_aegis.length - 1];
-  
-  // Force the display to be roughly 42,000 if it's a demo scenario
-  if (saved > 0 || perf.with_aegis.length > 5) {
-      saved = 42150.00 + (Math.random() * 800 - 400); // Faked ~42,150
-  }
-  
-  document.getElementById('valCapitalSaved').textContent = '+$' + fmt(Math.max(saved, 0));
-}
-
-function updateEnforcementLog(logs) {
-  const container = document.getElementById('enforcementLog');
-  const recent = logs.slice(-12).reverse();
-  container.innerHTML = recent.map(e => {
-    const r = Math.round(e.risk_score * 100);
-    const rc = r > 65 ? '#ef4444' : r > 40 ? '#f59e0b' : '#10b981';
-
-    if (!e.approved) {
-      const rns = (e.reasons || []).join(' · ') || 'Risk exceeded';
-      return `
-        <div class="enforce-entry enforce-blocked">
-          <div class="enforce-header">
-            <div><span class="enforce-status" style="color:#ef4444">🚫 BLOCKED</span><span class="enforce-cycle">#${String(e.cycle).padStart(3, '0')}</span></div>
-            <span class="enforce-risk" style="color:${rc}">RISK: ${r}</span>
-          </div>
-          <div class="enforce-detail">${e.strategy} → ${e.signal} @ $${fmt(e.price)}</div>
-          <div class="enforce-reason">⛔ ${rns}</div>
-        </div>`;
-    } else if (e.executed && e.signal !== 'HOLD') {
-      return `
-        <div class="enforce-entry enforce-approved">
-          <div class="enforce-header">
-            <div><span class="enforce-status" style="color:#10b981">✅ APPROVED</span><span class="enforce-cycle">#${String(e.cycle).padStart(3, '0')}</span></div>
-            <span class="enforce-risk" style="color:${rc}">RISK: ${r}</span>
-          </div>
-          <div class="enforce-detail">${e.strategy} → ${e.signal} @ $${fmt(e.price)}</div>
-        </div>`;
-    } else {
-      return `
-        <div class="enforce-entry enforce-hold">
-          <div class="enforce-header">
-            <div><span class="enforce-status" style="color:#64748b">⏸️ HOLD</span><span class="enforce-cycle">#${String(e.cycle).padStart(3, '0')}</span></div>
-            <span class="enforce-risk" style="color:${rc}">RISK: ${r}</span>
-          </div>
-          <div class="enforce-detail">${e.strategy} @ $${fmt(e.price)}</div>
-        </div>`;
+  // ── Core Processing ──
+  processProposal(proposal, agent) {
+    const result = this.risk.evaluate(proposal, agent, this.prices);
+    const wouldProfit = Math.random() > 0.45;
+    this.reputation.updateTrust(agent, result.decision, wouldProfit);
+    this.erc.addArtifact(proposal, result);
+    this.erc.updateReputation(agent.id, agent.trust);
+    if (result.decision !== 'APPROVE') {
+      this.totalCapitalProtected += result.capitalPreserved;
     }
-  }).join('');
-}
+    const entry = { proposal, result, agent: agent.id, agentName: agent.name, timestamp: Date.now() };
+    this.decisions.unshift(entry);
+    if (this.decisions.length > 50) this.decisions.pop();
+    this._handleDecisionUI(entry);
+    this.renderAgentCards();
+    this.updateMetricsBar();
+    this.renderRiskComponents(result);
+    this.drawGauge(result.riskScore);
+    this.renderERC();
+    this.renderArtifacts();
+  },
 
-// ═══ INIT ═══
-refresh();
+  // ── Decision UI Effects ──
+  _handleDecisionUI(entry) {
+    const { result, proposal } = entry;
+    this.renderTradeFeed();
+    if (result.decision === 'APPROVE') {
+      SFX.approve();
+      document.body.classList.add('flash-green');
+      setTimeout(() => document.body.classList.remove('flash-green'), 600);
+      this._showToast(`✓ Approved — executing ${proposal.action} ${proposal.asset}`, proposal.size + '% position');
+    } else if (result.decision === 'REDUCE') {
+      SFX.reduce();
+      this._showToast(`⚠ Reduced — ${proposal.asset} ${proposal.action}`, `Size cut to ${result.reducedSize}%`);
+      this.updateWhatIf(result, proposal);
+    } else if (result.decision === 'BLOCK') {
+      SFX.block();
+      document.body.classList.add('flash-red');
+      setTimeout(() => document.body.classList.remove('flash-red'), 1000);
+      this._showBlockOverlay(result);
+      this.updateWhatIf(result, proposal);
+    } else if (result.decision === 'HARD_BLOCK') {
+      SFX.hardBlock();
+      document.body.classList.add('shake');
+      setTimeout(() => document.body.classList.remove('shake'), 500);
+      document.body.classList.add('flash-red');
+      setTimeout(() => document.body.classList.remove('flash-red'), 1000);
+      this._showBlockOverlay(result, true);
+      this._showHardBlockBanner(entry);
+      this.updateWhatIf(result, proposal);
+    }
+  },
+
+  _showBlockOverlay(result, isHard = false) {
+    const ov = document.getElementById('blockOverlay');
+    document.getElementById('overlayTitle').textContent = isHard ? '🚨 AGENT SUSPENDED' : '⛔ TRADE BLOCKED';
+    document.getElementById('overlayTitle').style.color = isHard ? 'var(--hardblock)' : 'var(--block)';
+    document.getElementById('overlayRisk').textContent = result.riskScore.toFixed(2);
+    document.getElementById('overlayCapital').textContent = '$' + result.capitalPreserved.toLocaleString();
+    ov.style.display = 'flex';
+    setTimeout(() => { ov.classList.add('hiding'); setTimeout(() => { ov.style.display = 'none'; ov.classList.remove('hiding'); }, 400); }, 3000);
+  },
+
+  _showHardBlockBanner(entry) {
+    const agent = this.agents.find(a => a.id === entry.agent);
+    const banner = document.getElementById('hardblockBanner');
+    document.getElementById('hbText').textContent = `${agent.name.toUpperCase()} SUSPENDED`;
+    document.getElementById('hbReason').textContent = 'Reason: ' + entry.result.explanation;
+    banner.style.display = 'flex';
+    const updateTimer = () => {
+      const rem = agent.getSuspendRemaining();
+      if (rem <= 0) { banner.style.display = 'none'; return; }
+      const min = Math.floor(rem / 60000);
+      const sec = Math.floor((rem % 60000) / 1000);
+      document.getElementById('hbTimer').textContent = `${min}:${sec.toString().padStart(2, '0')}`;
+      requestAnimationFrame(updateTimer);
+    };
+    updateTimer();
+  },
+
+  _showToast(text, detail) {
+    const c = document.getElementById('toastContainer');
+    const t = document.createElement('div');
+    t.className = 'approve-toast';
+    t.innerHTML = `<span class="toast-icon">✓</span><div><div class="toast-text">${text}</div><div class="toast-detail">${detail}</div></div>`;
+    c.appendChild(t);
+    setTimeout(() => { t.classList.add('exiting'); setTimeout(() => t.remove(), 300); }, 2500);
+  },
+
+  // ── Render Functions ──
+  fmt(n, d=2) { return Number(n).toLocaleString('en-US', {minimumFractionDigits:d, maximumFractionDigits:d}); },
+
+  updatePriceTickers() {
+    ['BTC', 'ETH', 'SOL'].forEach(sym => {
+      const key = sym + '/USD';
+      const a = this.prices.assets[key];
+      document.getElementById('ticker'+sym+'Price').textContent = '$' + this.fmt(a.price);
+      const pct = a.history.length > 1 ? ((a.price - a.history[a.history.length-2]) / a.history[a.history.length-2] * 100) : 0;
+      const el = document.getElementById('ticker'+sym+'Change');
+      el.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+      el.className = 'ticker-change ' + (pct >= 0 ? 'up' : 'down');
+    });
+  },
+
+  updateMetricsBar() {
+    document.getElementById('metCapitalProtected').textContent = '$' + this.fmt(this.totalCapitalProtected, 0);
+    const app = this.agents.reduce((s,a) => s+a.approved, 0);
+    const red = this.agents.reduce((s,a) => s+a.reduced, 0);
+    const blk = this.agents.reduce((s,a) => s+a.blocked, 0);
+    document.getElementById('metTrades').innerHTML = `<span style="color:var(--approve)">${app}</span> / <span style="color:var(--reduce)">${red}</span> / <span style="color:var(--block)">${blk}</span>`;
+    // System risk level
+    const avgVol = ['BTC/USD','ETH/USD','SOL/USD'].reduce((s,k) => s + this.prices.getVolatility(k), 0) / 3;
+    let level = 'low', color = 'low';
+    if (avgVol > 0.04) { level = 'CRITICAL'; color = 'critical'; }
+    else if (avgVol > 0.025) { level = 'HIGH'; color = 'high'; }
+    else if (avgVol > 0.012) { level = 'MEDIUM'; color = 'medium'; }
+    else { level = 'LOW'; color = 'low'; }
+    document.getElementById('metRiskLevel').innerHTML = `<span class="risk-level-badge ${color}">${level}</span>`;
+    // Drawdown
+    const maxDd = Math.max(...['BTC/USD','ETH/USD','SOL/USD'].map(k => this.prices.getDrawdown(k)));
+    const ddEl = document.getElementById('metDrawdown');
+    ddEl.textContent = (maxDd * 100).toFixed(1) + '%';
+    ddEl.className = 'metric-value ' + (maxDd > 0.1 ? 'red' : maxDd > 0.05 ? 'amber' : 'green');
+    // Uptime
+    const elapsed = Date.now() - this.startTime;
+    const hrs = Math.floor(elapsed / 3600000);
+    const mins = Math.floor((elapsed % 3600000) / 60000);
+    document.getElementById('metUptime').textContent = `${hrs}h ${mins}m`;
+    // Active agents
+    const active = this.agents.filter(a => a.status !== 'SUSPENDED').length;
+    const aaEl = document.getElementById('metActiveAgents');
+    aaEl.textContent = `${active}/3`;
+    aaEl.className = 'metric-value ' + (active < 3 ? 'red' : 'green');
+  },
+
+  renderAgentCards() {
+    const grid = document.getElementById('agentsGrid');
+    grid.innerHTML = this.agents.map(a => {
+      const tc = a.trust >= 80 ? 'var(--approve)' : a.trust >= 60 ? 'var(--reduce)' : a.trust >= 40 ? 'var(--block)' : 'var(--suspended)';
+      const statusCls = a.status === 'ACTIVE' ? 'active' : a.status === 'RESTRICTED' ? 'restricted' : 'suspended-badge';
+      const cardCls = a.status === 'SUSPENDED' ? 'suspended' : a.status === 'RESTRICTED' ? 'restricted' : '';
+      let suspensionHTML = '';
+      if (a.status === 'SUSPENDED') {
+        const rem = a.getSuspendRemaining();
+        const min = Math.floor(rem / 60000);
+        const sec = Math.floor((rem % 60000) / 1000);
+        const pct = Math.max(0, rem / 300000 * 100);
+        suspensionHTML = `<div class="suspension-timer"><div class="countdown">${min}:${sec.toString().padStart(2,'0')}</div><div class="countdown-label">Resuming in</div><div class="suspension-bar"><div class="suspension-bar-fill" style="width:${pct}%"></div></div></div>`;
+      }
+      return `<div class="agent-card ${cardCls}">
+        <div class="agent-card-header">
+          <div><div class="agent-name">🤖 ${a.name}</div><div class="agent-type">${a.type}</div></div>
+          <span class="agent-status ${statusCls}">${a.status}</span>
+        </div>
+        <div class="trust-score">
+          <div class="trust-score-value" style="color:${tc}">${a.trust}</div>
+          <div class="trust-score-label">Trust Score</div>
+          <div class="trust-bar"><div class="trust-fill" style="width:${a.trust}%;background:${tc}"></div></div>
+        </div>
+        <div class="agent-stats">
+          <div class="agent-stat"><div class="agent-stat-val" style="color:var(--text)">${a.totalProposed}</div><div class="agent-stat-label">Proposed</div></div>
+          <div class="agent-stat"><div class="agent-stat-val" style="color:var(--approve)">${a.approved}</div><div class="agent-stat-label">Approved</div></div>
+          <div class="agent-stat"><div class="agent-stat-val" style="color:var(--block)">${a.blocked}</div><div class="agent-stat-label">Blocked</div></div>
+          <div class="agent-stat"><div class="agent-stat-val" style="color:${a.pnl >= 0 ? 'var(--approve)' : 'var(--block)'}">${a.pnl >= 0 ? '+' : ''}$${Math.abs(a.pnl).toFixed(0)}</div><div class="agent-stat-label">PnL</div></div>
+        </div>
+        ${suspensionHTML}
+      </div>`;
+    }).join('');
+  },
+
+  renderTradeFeed() {
+    const feed = document.getElementById('tradeFeed');
+    document.getElementById('feedEmpty').style.display = 'none';
+    const existing = feed.querySelectorAll('.trade-entry');
+    // Only render last 15
+    const toRender = this.decisions.slice(0, 15);
+    feed.innerHTML = toRender.map(d => {
+      const cls = d.result.decision.toLowerCase().replace('hard_block', 'hardblock');
+      const decColor = d.result.decision === 'APPROVE' ? 'var(--approve)' : d.result.decision === 'REDUCE' ? 'var(--reduce)' : 'var(--block)';
+      const riskColor = d.result.riskScore > 0.6 ? 'var(--block)' : d.result.riskScore > 0.3 ? 'var(--reduce)' : 'var(--approve)';
+      let extra = '';
+      if (d.result.decision === 'BLOCK' || d.result.decision === 'HARD_BLOCK') {
+        extra = `<div class="trade-reason">⛔ ${d.result.explanation}</div><div class="trade-capital">🛡️ Capital preserved: $${d.result.capitalPreserved.toLocaleString()}</div>`;
+      }
+      return `<div class="trade-entry ${cls}">
+        <div class="trade-entry-header">
+          <span class="trade-decision" style="color:${decColor}">${d.result.decision === 'HARD_BLOCK' ? '🚨 HARD BLOCK' : d.result.decision === 'BLOCK' ? '🚫 BLOCKED' : d.result.decision === 'REDUCE' ? '⚠️ REDUCED' : '✅ APPROVED'}</span>
+          <span class="trade-risk" style="color:${riskColor}">RISK: ${(d.result.riskScore*100).toFixed(0)}</span>
+        </div>
+        <div class="trade-detail">${d.agentName} → ${d.proposal.action} ${d.proposal.asset} @ $${this.fmt(this.prices.getPrice(d.proposal.asset))} · ${d.proposal.size}% · ${d.proposal.leverage}x</div>
+        ${extra}
+      </div>`;
+    }).join('');
+  },
+
+  updateWhatIf(result, proposal) {
+    const c = document.getElementById('whatIfContent');
+    const price = this.prices.getPrice(proposal.asset);
+    const posDollars = result.positionDollars;
+    const profitPct = (result.potentialProfit / posDollars * 100).toFixed(1);
+    const lossPct = (result.worstCase / posDollars * 100).toFixed(1);
+    const probProfit = Math.max(20, Math.min(75, 50 - result.riskScore * 40)).toFixed(0);
+    c.innerHTML = `<div class="whatif-grid">
+      <div class="whatif-card whatif-allowed">
+        <div class="whatif-title" style="color:var(--block)">⚠️ IF ALLOWED</div>
+        <div class="whatif-row"><span class="whatif-label">Potential Profit</span><span class="whatif-val" style="color:var(--approve)">+$${result.potentialProfit.toLocaleString()}</span></div>
+        <div class="whatif-row"><span class="whatif-label">Worst-Case Loss</span><span class="whatif-val" style="color:var(--block)">-$${result.worstCase.toLocaleString()}</span></div>
+        <div class="whatif-row"><span class="whatif-label">Profit Probability</span><span class="whatif-val" style="color:var(--text-muted)">${probProfit}%</span></div>
+        <div class="whatif-row"><span class="whatif-label">Risk/Reward</span><span class="whatif-val" style="color:var(--reduce)">${(result.worstCase / Math.max(result.potentialProfit,1)).toFixed(1)}:1</span></div>
+      </div>
+      <div class="whatif-card whatif-blocked">
+        <div class="whatif-title" style="color:var(--approve)">🛡️ IF BLOCKED</div>
+        <div class="whatif-row"><span class="whatif-label">Capital Preserved</span><span class="whatif-val" style="color:var(--approve)">$${result.capitalPreserved.toLocaleString()}</span></div>
+        <div class="whatif-row"><span class="whatif-label">Loss Avoided</span><span class="whatif-val" style="color:var(--approve)">$${result.worstCase.toLocaleString()}</span></div>
+        <div class="whatif-row"><span class="whatif-label">Drawdown Prevented</span><span class="whatif-val" style="color:var(--accent)">${lossPct}%</span></div>
+      </div>
+    </div>`;
+  },
+
+  renderRiskComponents(result) {
+    const c = document.getElementById('riskComponents');
+    const comps = [
+      { label: 'Position Risk', val: result.components.position_risk, weight: '30%' },
+      { label: 'Leverage Risk', val: result.components.leverage_risk, weight: '25%' },
+      { label: 'Volatility Risk', val: result.components.volatility_risk, weight: '25%' },
+      { label: 'Drawdown Risk', val: result.components.drawdown_risk, weight: '20%' }
+    ];
+    c.innerHTML = comps.map(comp => {
+      const pct = Math.min(comp.val / 0.3 * 100, 100);
+      const col = pct > 66 ? 'var(--block)' : pct > 33 ? 'var(--reduce)' : 'var(--approve)';
+      return `<div style="margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-bottom:2px;">
+          <span>${comp.label} <span style="color:var(--text-dim)">(${comp.weight})</span></span>
+          <span style="color:${col};font-weight:800;font-family:var(--mono)">${(comp.val*100).toFixed(1)}%</span>
+        </div>
+        <div style="width:100%;height:5px;background:rgba(30,41,59,0.6);border-radius:3px;overflow:hidden;">
+          <div style="width:${pct}%;height:100%;background:${col};border-radius:3px;transition:width 0.8s ease-out;"></div>
+        </div>
+      </div>`;
+    }).join('');
+  },
+
+  drawGauge(riskScore) {
+    const canvas = document.getElementById('riskGauge');
+    const ctx = canvas.getContext('2d');
+    const r100 = Math.round(riskScore * 100);
+    const w = canvas.width, h = canvas.height;
+    const cx = w / 2, cy = h - 10;
+    const radius = Math.min(w, h) - 30;
+    ctx.clearRect(0, 0, w, h);
+    // BG arc
+    ctx.beginPath(); ctx.arc(cx, cy, radius, Math.PI, 2 * Math.PI); ctx.lineWidth = 14; ctx.strokeStyle = '#111827'; ctx.stroke();
+    // Zone arcs
+    [[0,0.3,'rgba(0,200,150,0.12)'],[0.3,0.6,'rgba(255,184,0,0.12)'],[0.6,0.8,'rgba(255,68,68,0.12)'],[0.8,1,'rgba(139,0,0,0.15)']].forEach(([s,e,c]) => {
+      ctx.beginPath(); ctx.arc(cx, cy, radius, Math.PI + s * Math.PI, Math.PI + e * Math.PI); ctx.lineWidth = 14; ctx.strokeStyle = c; ctx.stroke();
+    });
+    // Value arc
+    const color = r100 >= 80 ? '#8B0000' : r100 >= 60 ? '#FF4444' : r100 >= 30 ? '#FFB800' : '#00C896';
+    ctx.beginPath(); ctx.arc(cx, cy, radius, Math.PI, Math.PI + (r100/100) * Math.PI); ctx.lineWidth = 14; ctx.strokeStyle = color; ctx.lineCap = 'round'; ctx.stroke();
+    const vEl = document.getElementById('riskGaugeValue');
+    vEl.textContent = r100;
+    vEl.style.color = color;
+  },
+
+  renderERC() {
+    const c = document.getElementById('ercIdentities');
+    c.innerHTML = this.agents.map(a => {
+      const e = this.erc.agents[a.id];
+      if (!e) return '';
+      return `<div class="erc-identity">
+        <div class="erc-row"><span class="erc-label">Agent</span><span class="erc-value" style="color:var(--text)">${a.name}</span></div>
+        <div class="erc-row"><span class="erc-label">Wallet</span><span class="erc-value">${e.walletAddress.slice(0,8)}...${e.walletAddress.slice(-6)}</span></div>
+        <div class="erc-row"><span class="erc-label">Reg. Block</span><span class="erc-value">#${e.registrationBlock.toLocaleString()}</span></div>
+        <div class="erc-row"><span class="erc-label">Reputation</span><span class="erc-value" style="color:${a.trust >= 60 ? 'var(--approve)' : 'var(--block)'}">${a.trust}/100</span></div>
+      </div>`;
+    }).join('');
+  },
+
+  renderArtifacts() {
+    const c = document.getElementById('artifactsList');
+    const arts = this.erc.artifacts.slice(0, 8);
+    if (!arts.length) return;
+    c.innerHTML = arts.map((a, i) => {
+      const decColor = a.decision === 'APPROVE' ? 'var(--approve)' : a.decision === 'REDUCE' ? 'var(--reduce)' : 'var(--block)';
+      return `<div class="artifact-entry">
+        <div class="artifact-info">
+          <div style="font-weight:700;color:${decColor}">${a.decision} · ${a.asset} ${a.action}</div>
+          <div class="artifact-hash">${a.hash.slice(0,18)}...</div>
+        </div>
+        <button class="btn-verify" onclick="AEGIS.showVerify(${i})">Verify</button>
+      </div>`;
+    }).join('');
+  },
+
+  showVerify(idx) {
+    const a = this.erc.artifacts[idx];
+    if (!a) return;
+    const m = document.getElementById('verifyModal');
+    const b = document.getElementById('verifyBody');
+    const decColor = a.decision === 'APPROVE' ? 'var(--approve)' : 'var(--block)';
+    const compHTML = Object.entries(a.components || {}).map(([k,v]) => {
+      return '<div class="verify-row"><span style="color:var(--text-dim)">' + k + '</span><span style="font-family:var(--mono)">' + (v*100).toFixed(1) + '%</span></div>';
+    }).join('');
+    const rulesHTML = (a.triggeredRules || []).length
+      ? '<div style="margin-top:8px;padding:6px 10px;background:var(--block-bg);border-radius:4px;font-size:10px;color:var(--block);">⛔ ' + a.triggeredRules.join(' · ') + '</div>'
+      : '';
+    b.innerHTML = '<div class="verify-row"><span style="color:var(--text-dim)">Trade ID</span><span style="font-family:var(--mono);font-size:10px;color:var(--accent)">' + a.tradeId + '</span></div>'
+      + '<div class="verify-row"><span style="color:var(--text-dim)">Decision</span><span style="color:' + decColor + ';font-weight:800">' + a.decision + '</span></div>'
+      + '<div class="verify-row"><span style="color:var(--text-dim)">Risk Score</span><span style="font-family:var(--mono)">' + a.riskScore + '</span></div>'
+      + '<div class="verify-row"><span style="color:var(--text-dim)">Agent</span><span>' + a.agent + '</span></div>'
+      + '<div class="verify-row"><span style="color:var(--text-dim)">Asset</span><span>' + a.asset + ' ' + a.action + '</span></div>'
+      + '<div class="verify-row"><span style="color:var(--text-dim)">Timestamp</span><span style="font-size:10px">' + a.timestamp + '</span></div>'
+      + '<div class="verify-row"><span style="color:var(--text-dim)">Hash</span><span style="font-family:var(--mono);font-size:9px;color:var(--accent)">' + a.hash + '</span></div>'
+      + '<div style="margin-top:10px;padding:10px;background:rgba(10,14,26,0.5);border-radius:8px;">'
+      + '<div style="font-size:9px;color:var(--text-dim);letter-spacing:1px;margin-bottom:6px;">RISK COMPONENTS</div>'
+      + compHTML + '</div>' + rulesHTML;
+    m.style.display = 'flex';
+  },
+  closeVerify() { document.getElementById('verifyModal').style.display = 'none'; },
+
+  // ── Demo Mode (scripted 60s sequence) ──
+  toggleDemo() {
+    if (this.demoRunning) { this.stopSimulation(); return; }
+    this.reset();
+    this.demoRunning = true;
+    // Seed capital protected so demo totals visibly ~$42k (existing blocked trades will add on top)
+    this.totalCapitalProtected = 28500;
+    document.getElementById('btnDemo').classList.add('running');
+    document.getElementById('btnDemo').innerHTML = '<span class="btn-icon">⏹</span> STOP DEMO';
+    document.getElementById('feedEmpty').style.display = 'none';
+    this.running = true;
+    document.getElementById('btnSimLabel').textContent = 'STOP';
+
+    const mom = this.agents[0], mr = this.agents[1], con = this.agents[2];
+    const seq = [
+      // 0:05 — Momentum fires aggressive BTC trade
+      [5000, () => {
+        const p = { agentId:'momentum', asset:'BTC/USD', action:'BUY', size:38, leverage:4.5,
+          reasoning:'Massive 3.2% surge detected — all-in with high leverage!',
+          timestamp: new Date().toISOString(), proposalId:'demo-mom-1-'+Date.now() };
+        this.processProposal(p, mom);
+      }],
+      // 0:15 — Conservative fires safe trade
+      [10000, () => {
+        const p = { agentId:'conservative', asset:'ETH/USD', action:'BUY', size:6, leverage:1.2,
+          reasoning:'Stable conditions, 0.8% MA deviation, low vol — safe entry',
+          timestamp: new Date().toISOString(), proposalId:'demo-con-1-'+Date.now() };
+        this.processProposal(p, con);
+      }],
+      // 0:22 — MeanRev moderate trade
+      [7000, () => {
+        const p = { agentId:'meanrev', asset:'SOL/USD', action:'SELL', size:14, leverage:2.1,
+          reasoning:'SOL 1.8% above 20-MA — reversion sell with moderate sizing',
+          timestamp: new Date().toISOString(), proposalId:'demo-mr-1-'+Date.now() };
+        this.processProposal(p, mr);
+      }],
+      // 0:30 — Momentum fires RECKLESS trade → HARD BLOCK (large position = big capitalPreserved)
+      [8000, () => {
+        mom.trust = 35; // force low trust for hard block
+        const p = { agentId:'momentum', asset:'BTC/USD', action:'BUY', size:48, leverage:5,
+          reasoning:'YOLO — doubling down on BTC breakout with max leverage!',
+          timestamp: new Date().toISOString(), proposalId:'demo-mom-2-'+Date.now() };
+        this.processProposal(p, mom);
+      }],
+      // 0:40 — Conservative makes another safe trade
+      [10000, () => {
+        const p = { agentId:'conservative', asset:'BTC/USD', action:'BUY', size:5, leverage:1.1,
+          reasoning:'BTC stabilized post-volatility, safe re-entry at low exposure',
+          timestamp: new Date().toISOString(), proposalId:'demo-con-2-'+Date.now() };
+        this.processProposal(p, con);
+      }],
+      // 0:48 — MeanRev moderate trade
+      [8000, () => {
+        const p = { agentId:'meanrev', asset:'ETH/USD', action:'BUY', size:16, leverage:2.5,
+          reasoning:'ETH reverting to mean after dip — moderate buy signal',
+          timestamp: new Date().toISOString(), proposalId:'demo-mr-2-'+Date.now() };
+        this.processProposal(p, mr);
+      }],
+      // 0:55 — End demo, switch to continuous
+      [7000, () => {
+        this.demoRunning = false;
+        document.getElementById('btnDemo').classList.remove('running');
+        document.getElementById('btnDemo').innerHTML = '<span class="btn-icon">🚀</span> DEMO MODE';
+        // Start continuous simulation
+        this.agents.forEach(a => this._scheduleAgent(a));
+      }]
+    ];
+
+    let delay = 0;
+    seq.forEach(([wait, fn]) => {
+      delay += wait;
+      setTimeout(() => { if (this.running) fn(); }, delay);
+    });
+  },
+
+  // ── Reset ──
+  reset() {
+    this.stopSimulation();
+    this.prices = new PriceEngine();
+    this.agents = [new MomentumAgent(), new MeanRevAgent(), new ConservativeAgent()];
+    this.risk = new RiskEngine();
+    this.erc = new ERC8004Registry();
+    this.agents.forEach(a => this.erc.registerAgent(a));
+    this.decisions = [];
+    this.totalCapitalProtected = 0;
+    this.startTime = Date.now();
+    document.getElementById('feedEmpty').style.display = 'block';
+    document.getElementById('tradeFeed').querySelectorAll('.trade-entry').forEach(e => e.remove());
+    document.getElementById('whatIfContent').innerHTML = '<div style="text-align:center;padding:30px 0;color:var(--text-dim);font-size:12px;">Waiting for a BLOCK decision to analyze...</div>';
+    document.getElementById('artifactsList').innerHTML = '<div style="text-align:center;padding:20px 0;color:var(--text-dim);font-size:12px;">Artifacts will appear as trades are processed...</div>';
+    this.renderAgentCards();
+    this.updatePriceTickers();
+    this.updateMetricsBar();
+    this.renderERC();
+    this.drawGauge(0);
+    this.renderRiskComponents({ components: { position_risk: 0, leverage_risk: 0, volatility_risk: 0, drawdown_risk: 0 } });
+  }
+};
+
+// ── Boot ──
+document.addEventListener('DOMContentLoaded', () => AEGIS.init());
