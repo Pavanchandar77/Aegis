@@ -402,8 +402,9 @@ const AEGIS = {
     if (this.demoRunning) { this.stopSimulation(); return; }
     this.reset();
     this.demoRunning = true;
-    // Seed capital protected so demo totals visibly ~$42k (existing blocked trades will add on top)
-    this.totalCapitalProtected = 28500;
+    // Immediately show ~$42k capital protected for demo presentation
+    this.totalCapitalProtected = 41850;
+    this.updateMetricsBar();
     document.getElementById('btnDemo').classList.add('running');
     document.getElementById('btnDemo').innerHTML = '<span class="btn-icon">⏹</span> STOP DEMO';
     document.getElementById('feedEmpty').style.display = 'none';
